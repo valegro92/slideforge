@@ -938,16 +938,35 @@ export default function Editor({ onReset }) {
       const pSlide = pptx.addSlide();
       const det = slide.detection;
 
-      // 1. Background = original with text ERASED (like Canva Grab Text)
-      const grabbedText = [...slide.grabbedTextIndices].map(i => det.textBlocks[i]).filter(Boolean);
-      let bgDataUrl;
-      if (grabbedText.length > 0) {
-        let origCanvas = slide.origCanvas;
-        if (!origCanvas) origCanvas = await canvasFromDataUrl(slide.origDataUrl);
-        const erased = eraseTextFromImage(origCanvas, grabbedText);
-        bgDataUrl = erased.toDataURL('image/jpeg', 0.92);
-      } else {
-        bgDataUrl = slide.origDataUrl;
+      // 1. Background = original with text ERASED by AI (Gemini Image inpainting)
+      let bgDataUrl = slide.origDataUrl;
+      if (slide.grabbedTextIndices.size > 0) {
+        try {
+          const resp = await fetch('/api/inpaint', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: slide.origDataUrl }),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.cleanedImage) bgDataUrl = data.cleanedImage;
+          } else {
+            // Fallback: bilinear interpolation if AI inpainting fails
+            console.warn('AI inpainting failed, using bilinear fallback');
+            let origCanvas = slide.origCanvas;
+            if (!origCanvas) origCanvas = await canvasFromDataUrl(slide.origDataUrl);
+            const grabbedText = [...slide.grabbedTextIndices].map(i => det.textBlocks[i]).filter(Boolean);
+            const erased = eraseTextFromImage(origCanvas, grabbedText);
+            bgDataUrl = erased.toDataURL('image/jpeg', 0.92);
+          }
+        } catch (err) {
+          console.warn('AI inpainting error, using bilinear fallback:', err.message);
+          let origCanvas = slide.origCanvas;
+          if (!origCanvas) origCanvas = await canvasFromDataUrl(slide.origDataUrl);
+          const grabbedText = [...slide.grabbedTextIndices].map(i => det.textBlocks[i]).filter(Boolean);
+          const erased = eraseTextFromImage(origCanvas, grabbedText);
+          bgDataUrl = erased.toDataURL('image/jpeg', 0.92);
+        }
       }
       pSlide.addImage({ data: bgDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
 

@@ -251,3 +251,77 @@ export function validateResponse(response) {
 
   return { valid: true, normalized: { textBlocks, imageRegions }, warnings };
 }
+
+/**
+ * Use Gemini 2.5 Flash Image (Nano Banana) to erase all text from a slide.
+ * Sends the slide image with a prompt to remove text and reconstruct the background.
+ * Returns a base64 data URL of the cleaned image.
+ *
+ * @param {string} apiKey - OpenRouter API key
+ * @param {string} dataUrl - base64 image data URL of the slide
+ * @returns {Promise<string>} - base64 data URL of the cleaned image
+ */
+export async function eraseTextWithAI(apiKey, dataUrl) {
+  if (!apiKey) throw new Error('OpenRouter API key not provided');
+  if (!dataUrl) throw new Error('Image data URL not provided');
+
+  const INPAINT_PROMPT = `Remove ALL text from this presentation slide image.
+Erase every piece of text (titles, subtitles, body text, bullet points, numbers, labels, captions, footnotes) and reconstruct the background behind it seamlessly.
+Keep all non-text elements intact: photos, icons, charts, diagrams, logos, shapes, lines, decorative elements, background colors and gradients.
+The result should look like the original slide but with no readable text anywhere — only the visual/graphic elements remain.
+Return ONLY the cleaned image, no text response.`;
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://slideforge.app',
+      'X-Title': 'SlideForge',
+    },
+    body: JSON.stringify({
+      model: 'google/gemini-2.5-flash-preview-image',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: INPAINT_PROMPT },
+          { type: 'image_url', image_url: { url: dataUrl } }
+        ]
+      }],
+      temperature: 0.2,
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`AI inpainting error (${response.status}): ${errorText.substring(0, 300)}`);
+  }
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content;
+
+  // Gemini Image returns inline base64 image data
+  if (typeof content === 'string' && content.startsWith('data:image/')) {
+    return content;
+  }
+
+  // Sometimes returned as array with image_url parts
+  if (Array.isArray(content)) {
+    for (const part of content) {
+      if (part.type === 'image_url' && part.image_url?.url) {
+        return part.image_url.url;
+      }
+    }
+  }
+
+  // Check if content parts are in the message
+  const parts = data.choices?.[0]?.message?.content;
+  if (Array.isArray(parts)) {
+    for (const part of parts) {
+      if (part.type === 'image_url') return part.image_url?.url;
+      if (part.image_url?.url) return part.image_url.url;
+    }
+  }
+
+  throw new Error('AI inpainting returned no image');
+}
