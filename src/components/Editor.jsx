@@ -646,45 +646,24 @@ function getTextColor(px, w, h, x1, y1, x2, y2, bg) {
   return cnt ? [Math.round(sR / cnt), Math.round(sG / cnt), Math.round(sB / cnt)] : [0, 0, 0];
 }
 
-function cleanBackground(srcCanvas, imgData, textBlocks, imageRegions) {
-  const w = srcCanvas.width, h = srcCanvas.height;
-  const out = document.createElement('canvas');
-  out.width = w;
-  out.height = h;
-  const ctx = out.getContext('2d');
-  ctx.drawImage(srcCanvas, 0, 0);
-  const px = imgData.data;
-
-  // Erase image regions (they will be re-added as PPTX image elements)
-  for (const region of (imageRegions || [])) {
-    const x1 = Math.max(0, Math.round((region.x || 0) * w));
-    const y1 = Math.max(0, Math.round((region.y || 0) * h));
-    const x2 = Math.min(w, Math.round(((region.x || 0) + (region.w || 0)) * w));
-    const y2 = Math.min(h, Math.round(((region.y || 0) + (region.h || 0)) * h));
-    if (x2 <= x1 || y2 <= y1) continue;
-    const bg = sampleBg(px, w, h, x1, y1, x2, y2);
-    ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
-    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-  }
-
-  // Erase text blocks (they will be re-added as PPTX text boxes)
-  for (const b of textBlocks) {
-    const pxL = Math.max(0, Math.round((b.x || 0) * w));
-    const pxT = Math.max(0, Math.round((b.y || 0) * h));
-    const pxR = Math.min(w, Math.round(((b.x || 0) + (b.w || 0)) * w));
-    const pxB = Math.min(h, Math.round(((b.y || 0) + (b.h || 0)) * h));
-    const padX = Math.max(10, Math.round((pxR - pxL) * 0.04));
-    const padY = Math.max(8, Math.round((pxB - pxT) * 0.08));
-    const x1 = Math.max(0, pxL - padX);
-    const y1 = Math.max(0, pxT - padY);
-    const x2 = Math.min(w, pxR + padX);
-    const y2 = Math.min(h, pxB + padY);
-    const bg = sampleBg(px, w, h, x1, y1, x2, y2);
-    ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
-    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-  }
-
-  return out;
+/**
+ * Enforce minimum 3:1 contrast ratio (WCAG) between text and background.
+ * Falls back to black or white if contrast is too low.
+ */
+function enforceContrast(tc, bg) {
+  const lum = ([r, g, b]) => {
+    const [rs, gs, bs] = [r, g, b].map(c => {
+      c /= 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+  };
+  const ratio = (l1, l2) => (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  const bgL = lum(bg), tcL = lum(tc);
+  if (ratio(bgL, tcL) >= 3) return tc;
+  const blackR = ratio(bgL, lum([0, 0, 0]));
+  const whiteR = ratio(bgL, lum([255, 255, 255]));
+  return blackR >= whiteR ? [0, 0, 0] : [255, 255, 255];
 }
 
 // ─── PDF.js loader ────────────────────────────────────────────────────────────
@@ -964,42 +943,26 @@ export default function Editor({ onReset }) {
     const SLIDE_W = 13.33;
     const SLIDE_H = 7.5;
 
+    const toHex = ([r, g, b]) =>
+      [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+
     for (const slide of slideSubset) {
       const pSlide = pptx.addSlide();
-
       const det = slide.detection;
-      const hasGrabbedText = slide.grabbedTextIndices.size > 0;
-      const hasGrabbedImages = slide.grabbedImageIndices.size > 0;
-      const hasAnyGrabbed = hasGrabbedText || hasGrabbedImages;
 
+      // 1. Background = immagine ORIGINALE (zero cleaning)
+      pSlide.addImage({ data: slide.origDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
+
+      // Skip if no text grabbed
+      if (slide.grabbedTextIndices.size === 0) continue;
+
+      // 2. Sample colors from original canvas
       let origCanvas = slide.origCanvas;
-      if (!origCanvas) {
-        origCanvas = await canvasFromDataUrl(slide.origDataUrl);
-      }
+      if (!origCanvas) origCanvas = await canvasFromDataUrl(slide.origDataUrl);
+      const cw = origCanvas.width, ch = origCanvas.height;
+      const imgData = origCanvas.getContext('2d').getImageData(0, 0, cw, ch);
 
-      let bgDataUrl;
-
-      if (hasAnyGrabbed) {
-        const tmpCtx = origCanvas.getContext('2d');
-        const imgData = tmpCtx.getImageData(0, 0, origCanvas.width, origCanvas.height);
-        const grabbedText = [...slide.grabbedTextIndices].map(i => det.textBlocks[i]).filter(Boolean);
-        const grabbedImages = [...slide.grabbedImageIndices].map(i => det.imageRegions[i]).filter(Boolean);
-        const cleaned = cleanBackground(origCanvas, imgData, grabbedText, grabbedImages);
-        bgDataUrl = cleaned.toDataURL('image/jpeg', 0.92);
-      } else {
-        bgDataUrl = slide.origDataUrl;
-      }
-
-      pSlide.addImage({ data: bgDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
-
-
-
-      if (!hasAnyGrabbed) continue;
-
-      const cw = origCanvas.width;
-      const ch = origCanvas.height;
-      const imgDataForColors = origCanvas.getContext('2d').getImageData(0, 0, cw, ch);
-
+      // 3. Text boxes with OPAQUE FILL — cover original rasterized text
       for (const idx of slide.grabbedTextIndices) {
         const tb = det.textBlocks[idx];
         if (!tb) continue;
@@ -1009,52 +972,35 @@ export default function Editor({ onReset }) {
         const pxR = Math.min(cw, Math.round(((tb.x || 0) + (tb.w || 0)) * cw));
         const pxB = Math.min(ch, Math.round(((tb.y || 0) + (tb.h || 0)) * ch));
 
-        const bg = sampleBg(imgDataForColors.data, cw, ch, pxL, pxT, pxR, pxB);
-        const tc = getTextColor(imgDataForColors.data, cw, ch, pxL, pxT, pxR, pxB, bg);
-        const toHex = ([r, g, b]) =>
-          [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+        const bg = sampleBg(imgData.data, cw, ch, pxL, pxT, pxR, pxB);
+        const tc = enforceContrast(
+          getTextColor(imgData.data, cw, ch, pxL, pxT, pxR, pxB, bg),
+          bg
+        );
 
-        const fontSize = tb.fontSize || 18;
+        // Clamp to slide boundaries
+        let tx = Math.max(0, (tb.x || 0) * SLIDE_W);
+        let ty = Math.max(0, (tb.y || 0) * SLIDE_H);
+        let tw = Math.max(0.1, (tb.w || 0.1) * SLIDE_W);
+        let th = Math.max(0.05, (tb.h || 0.05) * SLIDE_H);
+        if (tx + tw > SLIDE_W) tw = SLIDE_W - tx;
+        if (ty + th > SLIDE_H) th = SLIDE_H - ty;
+
         pSlide.addText(tb.text || '', {
-          x: (tb.x || 0) * SLIDE_W,
-          y: (tb.y || 0) * SLIDE_H,
-          w: (tb.w || 0.1) * SLIDE_W,
-          h: (tb.h || 0.05) * SLIDE_H,
-          fontSize: Math.max(8, Math.min(72, fontSize)),
+          x: tx, y: ty, w: tw, h: th,
+          fontSize: Math.max(8, Math.min(72, tb.fontSize || 18)),
           color: toHex(tc),
           bold: tb.bold === true,
           align: tb.align || 'left',
           fontFace: 'Arial',
           wrap: true,
           valign: 'top',
+          margin: 0,
+          fill: { color: toHex(bg) },
         });
       }
 
-      for (const idx of slide.grabbedImageIndices) {
-        const region = det.imageRegions[idx];
-        if (!region) continue;
-
-        const rx = Math.max(0, Math.round((region.x || 0) * cw));
-        const ry = Math.max(0, Math.round((region.y || 0) * ch));
-        const rw = Math.min(cw - rx, Math.round((region.w || 0) * cw));
-        const rh = Math.min(ch - ry, Math.round((region.h || 0) * ch));
-
-        if (rw < 4 || rh < 4) continue;
-
-        const crop = document.createElement('canvas');
-        crop.width = rw;
-        crop.height = rh;
-        crop.getContext('2d').drawImage(origCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
-        const cropDataUrl = crop.toDataURL('image/png');
-
-        pSlide.addImage({
-          data: cropDataUrl,
-          x: (region.x || 0) * SLIDE_W,
-          y: (region.y || 0) * SLIDE_H,
-          w: (region.w || 0.1) * SLIDE_W,
-          h: (region.h || 0.1) * SLIDE_H,
-        });
-      }
+      // Image regions stay in the background — no cropping needed
     }
 
     const safeName = name.replace(/[^a-z0-9_-]/gi, '_') || 'slideforge';
