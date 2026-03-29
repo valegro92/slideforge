@@ -546,6 +546,78 @@ const STYLES = `
   }
   .export-done h2 { font-size: 22px; font-weight: 700; }
   .export-done p { font-size: 14px; color: var(--text-dim); }
+
+  /* ── Processing overlay ── */
+  .processing-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(20,18,17,0.75);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    z-index: 60;
+    gap: 16px;
+    color: var(--accent);
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .spinner-large {
+    width: 36px;
+    height: 36px;
+    border: 3px solid rgba(255,255,255,0.15);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+
+  /* ── Editable text blocks (editing mode) ── */
+  .editable-text-block {
+    position: absolute;
+    box-sizing: border-box;
+    background: transparent;
+    border: none;
+    outline: none;
+    cursor: text;
+    padding: 2px 4px;
+    line-height: 1.25;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: hidden;
+    pointer-events: all;
+  }
+  .editable-text-block:hover {
+    outline: 1.5px dashed rgba(45,212,168,0.45);
+    background: rgba(45,212,168,0.04);
+  }
+  .editable-text-block:focus {
+    outline: 2px solid var(--accent);
+    background: rgba(255,255,255,0.1);
+    box-shadow: 0 0 12px rgba(45,212,168,0.2);
+  }
+
+  /* ── Editing mode toolbar ── */
+  .editing-toolbar {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: rgba(20,18,17,0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    z-index: 40;
+    white-space: nowrap;
+  }
 `;
 
 // ─── SVG Icons ────────────────────────────────────────────────────────────────
@@ -638,17 +710,19 @@ function loadPptxGen() {
 function createSlideState(origDataUrl, width, height) {
   return {
     origDataUrl,
+    cleanedDataUrl: null,
     width,
     height,
-    mode: 'pristine', // 'pristine' | 'detected' | 'selecting'
+    mode: 'pristine', // 'pristine' | 'detected' | 'selecting' | 'processing' | 'editing'
     detection: {
-      status: 'idle', // 'idle' | 'loading' | 'done' | 'error'
+      status: 'idle',
       error: null,
       textBlocks: [],
       imageRegions: [],
     },
     grabbedTextIndices: new Set(),
     grabbedImageIndices: new Set(),
+    editedTexts: {}, // { blockIndex: "edited text" }
   };
 }
 
@@ -836,6 +910,74 @@ export default function Editor({ onReset }) {
     });
   }, []);
 
+  // ── Acquire text: inpaint slide and enter editing mode ──────────────────
+  const acquireText = useCallback(async (slideIndex) => {
+    // Set processing mode
+    setSlides(prev => {
+      const next = [...prev];
+      next[slideIndex] = { ...next[slideIndex], mode: 'processing' };
+      return next;
+    });
+
+    try {
+      const slide = slides[slideIndex];
+      const resp = await fetch('/api/inpaint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: slide.origDataUrl }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Inpainting fallito');
+      }
+
+      const data = await resp.json();
+      if (!data.cleanedImage) throw new Error('Nessuna immagine ricevuta');
+
+      // Extract the data URL from the response (could be string or object)
+      let cleanedUrl = data.cleanedImage;
+      if (typeof cleanedUrl === 'object' && cleanedUrl.image_url?.url) {
+        cleanedUrl = cleanedUrl.image_url.url;
+      }
+
+      setSlides(prev => {
+        const next = [...prev];
+        next[slideIndex] = {
+          ...next[slideIndex],
+          cleanedDataUrl: cleanedUrl,
+          mode: 'editing',
+        };
+        return next;
+      });
+    } catch (err) {
+      console.error('Acquire text error:', err);
+      setSlides(prev => {
+        const next = [...prev];
+        next[slideIndex] = {
+          ...next[slideIndex],
+          mode: 'detected',
+          detection: {
+            ...next[slideIndex].detection,
+            error: err.message,
+          },
+        };
+        return next;
+      });
+    }
+  }, [slides]);
+
+  // ── Update edited text for a block ──────────────────────────────────────
+  const updateBlockText = useCallback((slideIndex, blockIndex, newText) => {
+    setSlides(prev => {
+      const next = [...prev];
+      const slide = { ...next[slideIndex] };
+      slide.editedTexts = { ...slide.editedTexts, [blockIndex]: newText };
+      next[slideIndex] = slide;
+      return next;
+    });
+  }, []);
+
   // ── Build PPTX from a subset of slides ───────────────────────────────────
 
   const buildAndDownloadPptx = useCallback(async (slideSubset, name) => {
@@ -850,30 +992,19 @@ export default function Editor({ onReset }) {
       const pSlide = pptx.addSlide();
       const det = slide.detection;
 
-      // 1. Use AI to get clean background (text removed by diffusion model)
-      let cleanBgUrl;
-      try {
-        const resp = await fetch('/api/inpaint', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: slide.origDataUrl }),
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.cleanedImage) cleanBgUrl = data.cleanedImage;
-        }
-      } catch { /* fall through */ }
+      // Background: inpainted image if available, else original
+      const bgDataUrl = slide.cleanedDataUrl || slide.origDataUrl;
+      pSlide.addImage({ data: bgDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
 
-      // 2. Background: AI-cleaned image (no text) or original as fallback
-      pSlide.addImage({
-        data: cleanBgUrl || slide.origDataUrl,
-        x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
-      });
-
-      // 3. Editable text boxes replace the erased text
+      // Editable text boxes with user-edited text
       for (const idx of slide.grabbedTextIndices) {
         const tb = det.textBlocks[idx];
         if (!tb) continue;
+
+        // Use edited text if available, otherwise AI-detected text
+        const text = (slide.editedTexts && slide.editedTexts[idx] !== undefined)
+          ? slide.editedTexts[idx]
+          : (tb.text || '');
 
         let tx = Math.max(0, (tb.x || 0) * SLIDE_W);
         let ty = Math.max(0, (tb.y || 0) * SLIDE_H);
@@ -884,13 +1015,13 @@ export default function Editor({ onReset }) {
 
         const color = (tb.color || '#333333').replace('#', '').toUpperCase();
 
-        pSlide.addText(tb.text || '', {
+        pSlide.addText(text, {
           x: tx, y: ty, w: tw, h: th,
           fontSize: Math.max(8, Math.min(72, tb.fontSize || 18)),
           color,
           bold: tb.bold === true,
           align: tb.align || 'left',
-          fontFace: 'Arial',
+          fontFace: tb.fontFamily || 'Arial',
           wrap: true,
           valign: 'top',
           margin: 0,
@@ -1086,6 +1217,8 @@ export default function Editor({ onReset }) {
               onSelectAll={() => selectAll(si)}
               onSetMode={(mode) => setSlideMode(si, mode)}
               onExportSlide={() => exportSlide(si)}
+              onAcquireText={() => acquireText(si)}
+              onUpdateText={(bi, text) => updateBlockText(si, bi, text)}
             />
           ))}
         </div>
@@ -1150,7 +1283,7 @@ function UploadZone({ isDragOver, onDragOver, onDragLeave, onDrop, onClick, maxP
 
 // ─── SlideCard sub-component ──────────────────────────────────────────────────
 
-function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSelectAll, onSetMode, onExportSlide }) {
+function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSelectAll, onSetMode, onExportSlide, onAcquireText, onUpdateText }) {
   const { origDataUrl, detection, grabbedTextIndices, grabbedImageIndices, mode, exporting } = slide;
   const det = detection;
   const isLoading = det.status === 'loading';
@@ -1165,10 +1298,14 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
   // mode === 'pristine': show toolbar with Cattura buttons
   // mode === 'detected': show results overlay + primary actions
   // mode === 'selecting': show manual selection mode
+  // mode === 'processing': AI is removing text (inpainting)
+  // mode === 'editing': show cleaned background with editable text blocks
 
   const isPristine = mode === 'pristine';
   const isDetected = mode === 'detected';
   const isSelecting = mode === 'selecting';
+  const isProcessing = mode === 'processing';
+  const isEditing = mode === 'editing';
 
   return (
     <div className="slide-wrap">
@@ -1184,11 +1321,21 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
             · {totalGrabbed} / {totalBlocks} selezionat{totalGrabbed !== 1 ? 'i' : 'o'}
           </span>
         )}
+        {isProcessing && (
+          <span style={{ marginLeft: 8, color: 'var(--text-dim)', fontWeight: 500 }}>
+            · elaborazione...
+          </span>
+        )}
+        {isEditing && (
+          <span style={{ marginLeft: 8, color: 'var(--accent)', fontWeight: 600 }}>
+            · modalità modifica
+          </span>
+        )}
       </div>
 
       <div className="slide-canvas-wrap">
         {/* Background image */}
-        <img className="slide-bg-img" src={origDataUrl} alt={`Slide ${index + 1}`} draggable={false} />
+        <img className="slide-bg-img" src={isEditing && slide.cleanedDataUrl ? slide.cleanedDataUrl : origDataUrl} alt={`Slide ${index + 1}`} draggable={false} />
 
         {/* Detected mode: visible highlight overlay (non-interactive) */}
         {isDetected && isDone && (
@@ -1254,6 +1401,46 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
                   <span className="select-img-badge">IMG</span>
                 )}
               </div>
+            ))}
+          </div>
+        )}
+
+        {/* Processing overlay — AI is removing text */}
+        {isProcessing && (
+          <div className="processing-overlay">
+            <div className="spinner-large" />
+            <span>Elaborazione in corso...</span>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)', fontWeight: 400 }}>
+              L'AI sta rimuovendo il testo dall'immagine
+            </span>
+          </div>
+        )}
+
+        {/* Editing mode: editable text blocks on cleaned background */}
+        {isEditing && (
+          <div className="slide-overlay" style={{ pointerEvents: 'auto' }}>
+            {det.textBlocks.map((tb, bi) => (
+              grabbedTextIndices.has(bi) && (
+                <div
+                  key={`e${bi}`}
+                  contentEditable
+                  suppressContentEditableWarning
+                  className="editable-text-block"
+                  style={{
+                    left: `${(tb.x || 0) * 100}%`,
+                    top: `${(tb.y || 0) * 100}%`,
+                    width: `${(tb.w || 0) * 100}%`,
+                    minHeight: `${(tb.h || 0) * 100}%`,
+                    color: tb.color || '#333333',
+                    fontSize: `${Math.max(8, Math.min(48, (tb.fontSize || 16) * 0.55))}px`,
+                    fontWeight: tb.bold ? '700' : '400',
+                    textAlign: tb.align || 'left',
+                    fontFamily: tb.fontFamily || 'Arial, sans-serif',
+                  }}
+                  onBlur={(e) => onUpdateText(bi, e.target.innerText)}
+                  dangerouslySetInnerHTML={{ __html: (slide.editedTexts?.[bi] !== undefined ? slide.editedTexts[bi] : (tb.text || '')).replace(/\n/g, '<br>') }}
+                />
+              )
             ))}
           </div>
         )}
@@ -1328,29 +1515,25 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
           </div>
         )}
 
-        {/* Detected mode actions: Scarica PPTX + Seleziona manualmente */}
-        {isDetected && isDone && (
+        {/* Detected mode actions: Acquisisci testo + Seleziona manualmente */}
+        {isDetected && isDone && totalBlocks > 0 && (
           <div className="slide-actions">
             <button
               className="btn-download-slide"
-              onClick={onExportSlide}
-              disabled={exporting || totalGrabbed === 0}
+              onClick={onAcquireText}
             >
-              {exporting ? <div className="spinner" style={{ borderTopColor: '#111' }} /> : <IconDownload />}
-              {exporting ? 'Generazione...' : 'Scarica PPTX'}
+              <IconText /> Acquisisci testo
             </button>
-            {totalBlocks > 0 && (
-              <button
-                className="btn-select-manual"
-                onClick={() => onSetMode('selecting')}
-              >
-                Seleziona manualmente
-              </button>
-            )}
+            <button
+              className="btn-select-manual"
+              onClick={() => onSetMode('selecting')}
+            >
+              Seleziona manualmente
+            </button>
           </div>
         )}
 
-        {/* Selecting mode actions: Scarica PPTX + Torna */}
+        {/* Selecting mode actions */}
         {isSelecting && isDone && (
           <div className="slide-actions">
             <button
@@ -1361,15 +1544,30 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
             </button>
             <button
               className="btn-download-slide"
+              onClick={onAcquireText}
+              disabled={totalGrabbed === 0}
+            >
+              <IconText />
+              {totalGrabbed === 0 ? 'Nessun elemento' : `Acquisisci testo (${totalGrabbed})`}
+            </button>
+          </div>
+        )}
+
+        {/* Editing mode actions: Download PPTX */}
+        {isEditing && (
+          <div className="editing-toolbar">
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+              Clicca sul testo per modificarlo
+            </span>
+            <div style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.1)' }} />
+            <button
+              className="btn-download-slide"
               onClick={onExportSlide}
-              disabled={exporting || totalGrabbed === 0}
+              disabled={exporting}
+              style={{ padding: '8px 16px', fontSize: 13 }}
             >
               {exporting ? <div className="spinner" style={{ borderTopColor: '#111' }} /> : <IconDownload />}
-              {exporting
-                ? 'Generazione...'
-                : totalGrabbed === 0
-                  ? 'Nessun elemento'
-                  : `Scarica PPTX (${totalGrabbed})`}
+              {exporting ? 'Generazione...' : 'Scarica PPTX'}
             </button>
           </div>
         )}

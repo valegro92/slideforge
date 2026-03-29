@@ -41,7 +41,8 @@ Each textBlock:
   "fontSize": estimated point size (integer, 8-48),
   "bold": true/false,
   "align": "left" | "center" | "right",
-  "color": "#RRGGBB hex color of the text (e.g. #1A2B3C)"
+  "color": "#RRGGBB hex color of the text (e.g. #1A2B3C)",
+  "fontFamily": "closest Google Font or web-safe font name (e.g. Roboto, Open Sans, Montserrat, Arial, Georgia)"
 }
 
 RULES:
@@ -200,6 +201,7 @@ function parseJsonResponse(text) {
       bold: !!b.bold,
       align: ['left', 'center', 'right'].includes(b.align) ? b.align : 'left',
       color: typeof b.color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(b.color) ? b.color : null,
+      fontFamily: typeof b.fontFamily === 'string' && b.fontFamily.trim() ? b.fontFamily.trim() : null,
     }));
 
   if (!Array.isArray(parsed.imageRegions)) parsed.imageRegions = [];
@@ -271,34 +273,60 @@ Keep all non-text elements intact: photos, icons, charts, diagrams, logos, shape
 The result should look like the original slide but with no readable text anywhere — only the visual/graphic elements remain.
 Return ONLY the cleaned image, no text response.`;
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://slideforge.app',
-      'X-Title': 'SlideForge',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash-image',
-      modalities: ['image', 'text'],
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: INPAINT_PROMPT },
-          { type: 'image_url', image_url: { url: dataUrl } }
-        ]
-      }],
-      temperature: 0.2,
-    })
-  });
+  let lastError = null;
+  let data = null;
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`AI inpainting error (${response.status}): ${errorText.substring(0, 300)}`);
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = Math.min(INITIAL_DELAY * Math.pow(2, attempt - 1), MAX_DELAY);
+      await new Promise(r => setTimeout(r, delay));
+    }
+
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://slideforge.app',
+          'X-Title': 'SlideForge',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash-image',
+          modalities: ['image', 'text'],
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: INPAINT_PROMPT },
+              { type: 'image_url', image_url: { url: dataUrl } }
+            ]
+          }],
+          temperature: 0.2,
+        })
+      });
+
+      if (response.status === 429 || response.status === 503) {
+        lastError = new Error(`Rate limited (${response.status})`);
+        continue;
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`AI inpainting error (${response.status}): ${errorText.substring(0, 300)}`);
+      }
+
+      data = await response.json();
+      break;
+
+    } catch (error) {
+      lastError = error;
+      if (attempt === MAX_RETRIES - 1) {
+        throw new Error(`Inpainting failed after ${MAX_RETRIES} attempts: ${lastError.message}`);
+      }
+    }
   }
 
-  const data = await response.json();
+  if (!data) throw lastError || new Error('AI inpainting failed');
   const msg = data.choices?.[0]?.message;
 
   // OpenRouter returns images as base64 data URLs in various locations
