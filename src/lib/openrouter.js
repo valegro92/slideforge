@@ -280,7 +280,8 @@ Return ONLY the cleaned image, no text response.`;
       'X-Title': 'SlideForge',
     },
     body: JSON.stringify({
-      model: 'google/gemini-2.5-flash-image-preview',
+      model: 'google/gemini-2.5-flash-image',
+      modalities: ['image', 'text'],
       messages: [{
         role: 'user',
         content: [
@@ -298,30 +299,35 @@ Return ONLY the cleaned image, no text response.`;
   }
 
   const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
+  const msg = data.choices?.[0]?.message;
 
-  // Gemini Image returns inline base64 image data
-  if (typeof content === 'string' && content.startsWith('data:image/')) {
-    return content;
+  // OpenRouter returns images as base64 data URLs in various locations
+  // 1. In message.images array (Gemini image models with modalities=["image","text"])
+  if (Array.isArray(msg?.images) && msg.images.length > 0) {
+    const img = msg.images[0];
+    if (typeof img === 'string') return img;
+    if (img?.image_url?.url) return img.image_url.url;
+    if (img?.url) return img.url;
   }
 
-  // Sometimes returned as array with image_url parts
-  if (Array.isArray(content)) {
-    for (const part of content) {
-      if (part.type === 'image_url' && part.image_url?.url) {
-        return part.image_url.url;
-      }
+  // 2. In content as string (direct base64)
+  if (typeof msg?.content === 'string' && msg.content.startsWith('data:image/')) {
+    return msg.content;
+  }
+
+  // 3. In content as array of parts
+  if (Array.isArray(msg?.content)) {
+    for (const part of msg.content) {
+      if (part.type === 'image_url' && part.image_url?.url) return part.image_url.url;
+      if (typeof part === 'string' && part.startsWith('data:image/')) return part;
     }
   }
 
-  // Check if content parts are in the message
-  const parts = data.choices?.[0]?.message?.content;
-  if (Array.isArray(parts)) {
-    for (const part of parts) {
-      if (part.type === 'image_url') return part.image_url?.url;
-      if (part.image_url?.url) return part.image_url.url;
-    }
+  // 4. Check data.images directly (some providers)
+  if (Array.isArray(data.images) && data.images.length > 0) {
+    return data.images[0];
   }
 
+  console.error('[inpaint] No image found. Full response:', JSON.stringify(data).substring(0, 800));
   throw new Error('AI inpainting returned no image');
 }
