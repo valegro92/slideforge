@@ -19,7 +19,7 @@
  */
 
 import { callOpenRouter, validateResponse } from '@/lib/openrouter';
-import { canUseModel, getMaxPages } from '@/lib/tiers';
+import { canUseModel, getMaxPages, resolveTier } from '@/lib/tiers';
 
 // Simple in-memory rate limiting (use Redis in production)
 const requestCounts = new Map();
@@ -106,8 +106,8 @@ function validateRequest(body) {
 
   if (!body.tier) {
     errors.push('Missing required field: tier');
-  } else if (!['free', 'pro', 'enterprise'].includes(body.tier)) {
-    errors.push('Invalid tier: must be free, pro, or enterprise');
+  } else if (!['free', 'pro', 'enterprise', 'admin'].includes(body.tier)) {
+    errors.push('Invalid tier: must be free, pro, enterprise, or admin');
   }
 
   return { valid: errors.length === 0, errors };
@@ -163,7 +163,8 @@ export async function POST(request) {
       );
     }
 
-    const { image, tier } = body;
+    const { image } = body;
+    const tier = resolveTier(body.tier);
     const model = body.model || getModelForTier(tier);
 
     if (!model) {

@@ -3,6 +3,12 @@
  * Defines feature gates, model access, and pricing
  */
 
+// Resolve tier aliases (admin → enterprise)
+export function resolveTier(tier) {
+  if (tier === 'admin') return 'enterprise';
+  return tier;
+}
+
 export const TIERS = {
   free: {
     name: 'Free',

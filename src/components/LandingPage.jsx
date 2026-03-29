@@ -1,9 +1,24 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import LoginModal from './LoginModal';
 import { useTier } from '../lib/TierContext';
+
+const theme = {
+  dark: '#292524',
+  darkAlt: '#1E1E1E',
+  teal: '#2DD4A8',
+  tealDim: 'rgba(45, 212, 168, 0.12)',
+  tealBorder: 'rgba(45, 212, 168, 0.25)',
+  stone800: '#1C1917',
+  stone700: '#292524',
+  stone600: '#3F3B39',
+  stone500: '#57534E',
+  stone400: '#A8A29E',
+  stone300: '#D6D3D1',
+  stone50: '#FAFAF9',
+};
 
 const LandingPage = () => {
   const [scrollY, setScrollY] = useState(0);
@@ -13,39 +28,29 @@ const LandingPage = () => {
 
   useEffect(() => {
     const handleScroll = () => setScrollY(window.scrollY);
-    window.addEventListener('scroll', handleScroll);
+    window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
   useEffect(() => {
-    const observerOptions = {
-      threshold: 0.15,
-      rootMargin: '0px 0px -100px 0px',
-    };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setVisibleSections((prev) => ({ ...prev, [entry.target.id]: true }));
+          }
+        });
+      },
+      { threshold: 0.12, rootMargin: '0px 0px -80px 0px' }
+    );
 
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          setVisibleSections((prev) => ({
-            ...prev,
-            [entry.target.id]: true,
-          }));
-        }
-      });
-    }, observerOptions);
-
-    document.querySelectorAll('[data-observe]').forEach((el) => {
-      observer.observe(el);
-    });
-
+    document.querySelectorAll('[data-observe]').forEach((el) => observer.observe(el));
     return () => observer.disconnect();
   }, []);
 
   const scrollToSection = (id) => {
-    const element = document.getElementById(id);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
 
   const handleLogin = ({ email, tier }) => {
@@ -53,46 +58,38 @@ const LandingPage = () => {
     setShowLoginModal(false);
   };
 
-  // CSS Variables for theming
-  const theme = {
-    dark: '#292524',
-    teal: '#2DD4A8',
-    amber: '#F59E0B',
-    stone700: '#3F3F46',
-    stone600: '#52525B',
-    stone400: '#A1A1AA',
-    stone300: '#D4D4D8',
-    stone50: '#FAFAFA',
-  };
+  const fadeIn = (id) => ({
+    opacity: visibleSections[id] ? 1 : 0,
+    transform: visibleSections[id] ? 'translateY(0)' : 'translateY(24px)',
+    transition: 'opacity 0.6s ease, transform 0.6s ease',
+  });
 
   return (
     <div
       style={{
-        '--primary-dark': theme.dark,
-        '--accent-teal': theme.teal,
-        '--accent-amber': theme.amber,
-        '--stone-700': theme.stone700,
-        '--stone-600': theme.stone600,
-        '--stone-400': theme.stone400,
-        '--stone-300': theme.stone300,
-        '--stone-50': theme.stone50,
+        fontFamily: 'DM Sans, system-ui, sans-serif',
+        backgroundColor: theme.dark,
+        color: theme.stone300,
+        minHeight: '100vh',
+        overflowX: 'hidden',
       }}
     >
-      {/* Navigation */}
+      {/* ── Navigation ──────────────────────────────────────────── */}
       <nav
         style={{
           position: 'sticky',
           top: 0,
           zIndex: 100,
-          backgroundColor: 'rgba(41, 37, 36, 0.95)',
-          backdropFilter: 'blur(10px)',
-          borderBottom: `1px solid ${theme.stone700}`,
+          backgroundColor: scrollY > 20 ? 'rgba(41, 37, 36, 0.97)' : 'transparent',
+          backdropFilter: scrollY > 20 ? 'blur(12px)' : 'none',
+          borderBottom: scrollY > 20 ? `1px solid ${theme.stone600}` : '1px solid transparent',
           padding: '1rem 0',
+          transition: 'all 0.3s ease',
         }}
       >
         <div
           style={{
-            maxWidth: '1280px',
+            maxWidth: '1200px',
             margin: '0 auto',
             padding: '0 1.5rem',
             display: 'flex',
@@ -100,51 +97,63 @@ const LandingPage = () => {
             alignItems: 'center',
           }}
         >
-          <div
-            style={{
-              fontSize: '1.5rem',
-              fontWeight: 700,
-              color: theme.teal,
-              fontFamily: 'DM Sans, sans-serif',
-              letterSpacing: '-0.02em',
-            }}
-          >
-            SlideForge
-          </div>
-          <div
-            style={{
-              display: 'flex',
-              gap: '2rem',
-              alignItems: 'center',
-            }}
-          >
-            <button
-              onClick={() => scrollToSection('how-it-works')}
+          {/* Logo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+            <span
               style={{
-                background: 'none',
-                border: 'none',
-                color: theme.stone300,
-                cursor: 'pointer',
-                fontSize: '0.95rem',
-                fontFamily: 'DM Sans, sans-serif',
-                transition: 'color 0.3s',
-                padding: '0.5rem 1rem',
+                fontSize: '1.375rem',
+                fontWeight: 700,
+                color: theme.teal,
+                letterSpacing: '-0.02em',
               }}
-              onMouseEnter={(e) => (e.target.style.color = theme.teal)}
-              onMouseLeave={(e) => (e.target.style.color = theme.stone300)}
             >
-              Come funziona
-            </button>
+              SlideForge
+            </span>
+            <span
+              style={{
+                fontSize: '0.75rem',
+                color: theme.stone400,
+                backgroundColor: theme.stone600,
+                padding: '0.2rem 0.5rem',
+                borderRadius: '999px',
+                fontWeight: 500,
+                letterSpacing: '0.01em',
+              }}
+            >
+              L'Officina
+            </span>
+          </div>
+
+          {/* Nav links */}
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {['Come funziona', 'Prezzi'].map((label, i) => {
+              const ids = ['how-it-works', 'pricing'];
+              return (
+                <button
+                  key={label}
+                  onClick={() => scrollToSection(ids[i])}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: theme.stone400,
+                    cursor: 'pointer',
+                    fontSize: '0.9rem',
+                    fontFamily: 'DM Sans, sans-serif',
+                    padding: '0.5rem 0.875rem',
+                    borderRadius: '0.375rem',
+                    transition: 'color 0.2s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = theme.teal)}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = theme.stone400)}
+                >
+                  {label}
+                </button>
+              );
+            })}
+
             {isLoggedIn ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span
-                  style={{
-                    fontSize: '0.875rem',
-                    color: theme.teal,
-                    fontFamily: 'DM Sans, sans-serif',
-                    fontWeight: 600,
-                  }}
-                >
+                <span style={{ fontSize: '0.85rem', color: theme.teal, fontWeight: 600 }}>
                   {user?.email}
                 </span>
                 <button
@@ -153,21 +162,21 @@ const LandingPage = () => {
                     background: 'none',
                     border: `1px solid ${theme.stone600}`,
                     color: theme.stone300,
-                    padding: '0.625rem 1.25rem',
+                    padding: '0.5rem 1rem',
                     borderRadius: '0.375rem',
-                    fontSize: '0.95rem',
+                    fontSize: '0.875rem',
                     fontWeight: 600,
                     fontFamily: 'DM Sans, sans-serif',
-                    transition: 'all 0.3s',
                     cursor: 'pointer',
+                    transition: 'all 0.2s',
                   }}
                   onMouseEnter={(e) => {
-                    e.target.style.borderColor = theme.teal;
-                    e.target.style.color = theme.teal;
+                    e.currentTarget.style.borderColor = theme.teal;
+                    e.currentTarget.style.color = theme.teal;
                   }}
                   onMouseLeave={(e) => {
-                    e.target.style.borderColor = theme.stone600;
-                    e.target.style.color = theme.stone300;
+                    e.currentTarget.style.borderColor = theme.stone600;
+                    e.currentTarget.style.color = theme.stone300;
                   }}
                 >
                   Esci
@@ -180,1451 +189,930 @@ const LandingPage = () => {
                   background: 'none',
                   border: `1px solid ${theme.stone600}`,
                   color: theme.stone300,
-                  padding: '0.625rem 1.25rem',
+                  padding: '0.5rem 1rem',
                   borderRadius: '0.375rem',
-                  fontSize: '0.95rem',
+                  fontSize: '0.875rem',
                   fontWeight: 600,
                   fontFamily: 'DM Sans, sans-serif',
-                  transition: 'all 0.3s',
                   cursor: 'pointer',
+                  transition: 'all 0.2s',
                 }}
                 onMouseEnter={(e) => {
-                  e.target.style.borderColor = theme.teal;
-                  e.target.style.color = theme.teal;
+                  e.currentTarget.style.borderColor = theme.teal;
+                  e.currentTarget.style.color = theme.teal;
                 }}
                 onMouseLeave={(e) => {
-                  e.target.style.borderColor = theme.stone600;
-                  e.target.style.color = theme.stone300;
+                  e.currentTarget.style.borderColor = theme.stone600;
+                  e.currentTarget.style.color = theme.stone300;
                 }}
               >
                 Accedi
               </button>
             )}
+
             <Link
               href="/app"
               style={{
-                backgroundColor: theme.amber,
+                backgroundColor: theme.teal,
                 color: theme.dark,
-                padding: '0.625rem 1.5rem',
+                padding: '0.5rem 1.125rem',
                 borderRadius: '0.375rem',
-                textDecoration: 'none',
-                fontSize: '0.95rem',
-                fontWeight: 600,
+                fontSize: '0.875rem',
+                fontWeight: 700,
                 fontFamily: 'DM Sans, sans-serif',
-                transition: 'all 0.3s',
-                display: 'inline-block',
-                cursor: 'pointer',
+                textDecoration: 'none',
+                transition: 'opacity 0.2s',
               }}
-              onMouseEnter={(e) => {
-                e.target.style.backgroundColor = '#FBBF24';
-                e.target.style.transform = 'scale(1.05)';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.backgroundColor = theme.amber;
-                e.target.style.transform = 'scale(1)';
-              }}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.85')}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
             >
-              Carica il tuo PDF
+              Carica PDF
             </Link>
           </div>
         </div>
       </nav>
 
-      {/* Hero Section */}
+      {/* ── Hero ────────────────────────────────────────────────── */}
       <section
-        id="hero"
-        data-observe
         style={{
-          backgroundColor: theme.dark,
-          background: `linear-gradient(135deg, ${theme.dark} 0%, #3a3431 100%)`,
-          color: theme.stone50,
-          padding: '120px 1.5rem',
+          padding: '7rem 1.5rem 5rem',
+          maxWidth: '1200px',
+          margin: '0 auto',
           textAlign: 'center',
-          position: 'relative',
-          overflow: 'hidden',
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
         }}
       >
-        {/* Animated background gradient orbs */}
+        {/* Badge */}
         <div
           style={{
-            position: 'absolute',
-            width: '400px',
-            height: '400px',
-            background: `radial-gradient(circle, ${theme.teal}20 0%, transparent 70%)`,
-            borderRadius: '50%',
-            top: '-100px',
-            right: '-100px',
-            opacity: visibleSections.hero ? 1 : 0,
-            transition: 'opacity 1s ease-out',
-            animation: visibleSections.hero ? 'float 6s ease-in-out infinite' : 'none',
-            pointerEvents: 'none',
-          }}
-        />
-        <div
-          style={{
-            position: 'absolute',
-            width: '300px',
-            height: '300px',
-            background: `radial-gradient(circle, ${theme.teal}10 0%, transparent 70%)`,
-            borderRadius: '50%',
-            bottom: '-50px',
-            left: '-50px',
-            opacity: visibleSections.hero ? 1 : 0,
-            transition: 'opacity 1s ease-out',
-            animation: visibleSections.hero ? 'float 8s ease-in-out infinite reverse' : 'none',
-            pointerEvents: 'none',
-          }}
-        />
-
-        <div
-          style={{
-            maxWidth: '900px',
-            position: 'relative',
-            zIndex: 10,
-            animation: visibleSections.hero ? 'slideUp 0.8s ease-out' : 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            backgroundColor: theme.tealDim,
+            border: `1px solid ${theme.tealBorder}`,
+            borderRadius: '999px',
+            padding: '0.375rem 0.875rem',
+            marginBottom: '2rem',
           }}
         >
-          {/* Hero Illustration */}
-          <div
-            style={{
-              marginBottom: '2rem',
-              height: '280px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              perspective: '1000px',
-            }}
-          >
-            <svg
-              viewBox="0 0 400 250"
-              style={{
-                width: '100%',
-                maxWidth: '400px',
-                height: 'auto',
-                filter: visibleSections.hero
-                  ? 'drop-shadow(0 20px 40px rgba(45, 212, 168, 0.15))'
-                  : 'none',
-                transition: 'filter 0.8s ease-out',
-              }}
-            >
-              {/* PDF Document */}
-              <g
-                style={{
-                  animation: visibleSections.hero
-                    ? 'slideInLeft 0.8s ease-out'
-                    : 'none',
-                }}
-              >
-                <rect
-                  x="20"
-                  y="50"
-                  width="80"
-                  height="110"
-                  rx="4"
-                  fill={theme.stone600}
-                  stroke={theme.stone400}
-                  strokeWidth="2"
-                />
-                <rect
-                  x="25"
-                  y="55"
-                  width="70"
-                  height="100"
-                  fill={theme.stone700}
-                />
-                <line
-                  x1="30"
-                  y1="70"
-                  x2="85"
-                  y2="70"
-                  stroke={theme.stone400}
-                  strokeWidth="1.5"
-                />
-                <line
-                  x1="30"
-                  y1="80"
-                  x2="85"
-                  y2="80"
-                  stroke={theme.stone400}
-                  strokeWidth="1.5"
-                />
-                <line
-                  x1="30"
-                  y1="90"
-                  x2="85"
-                  y2="90"
-                  stroke={theme.stone400}
-                  strokeWidth="1.5"
-                />
-                <rect
-                  x="30"
-                  y="100"
-                  width="20"
-                  height="20"
-                  rx="2"
-                  fill={theme.stone500 || theme.stone600}
-                />
-              </g>
-
-              {/* Magic Arrow */}
-              <g
-                style={{
-                  animation: visibleSections.hero
-                    ? 'pulse 2s ease-in-out infinite'
-                    : 'none',
-                  animationDelay: '0.3s',
-                }}
-              >
-                <path
-                  d="M 120 120 Q 160 100 200 120"
-                  stroke={theme.teal}
-                  strokeWidth="2.5"
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeDasharray="80"
-                  strokeDashoffset={visibleSections.hero ? '0' : '80'}
-                  style={{
-                    transition: 'stroke-dashoffset 1s ease-out',
-                  }}
-                />
-                <polygon
-                  points="200,120 210,115 205,125"
-                  fill={theme.teal}
-                />
-                {/* Sparkle effects */}
-                <circle
-                  cx="145"
-                  cy="95"
-                  r="3"
-                  fill={theme.teal}
-                  opacity={visibleSections.hero ? 0.6 : 0}
-                  style={{
-                    animation: visibleSections.hero
-                      ? 'twinkle 1.5s ease-in-out infinite'
-                      : 'none',
-                  }}
-                />
-                <circle
-                  cx="175"
-                  cy="110"
-                  r="2"
-                  fill={theme.amber}
-                  opacity={visibleSections.hero ? 0.6 : 0}
-                  style={{
-                    animation: visibleSections.hero
-                      ? 'twinkle 1.5s ease-in-out infinite'
-                      : 'none',
-                    animationDelay: '0.3s',
-                  }}
-                />
-              </g>
-
-              {/* PPTX Document */}
-              <g
-                style={{
-                  animation: visibleSections.hero
-                    ? 'slideInRight 0.8s ease-out'
-                    : 'none',
-                }}
-              >
-                <rect
-                  x="300"
-                  y="50"
-                  width="80"
-                  height="110"
-                  rx="4"
-                  fill={theme.teal}
-                  opacity="0.1"
-                  stroke={theme.teal}
-                  strokeWidth="2"
-                />
-                <rect
-                  x="305"
-                  y="55"
-                  width="70"
-                  height="100"
-                  fill={theme.teal}
-                  opacity="0.05"
-                />
-                <line
-                  x1="310"
-                  y1="70"
-                  x2="365"
-                  y2="70"
-                  stroke={theme.teal}
-                  strokeWidth="2"
-                />
-                <rect
-                  x="310"
-                  y="80"
-                  width="30"
-                  height="15"
-                  rx="2"
-                  fill={theme.teal}
-                  opacity="0.6"
-                />
-                <line
-                  x1="310"
-                  y1="102"
-                  x2="365"
-                  y2="102"
-                  stroke={theme.teal}
-                  strokeWidth="1.5"
-                  opacity="0.4"
-                />
-                <line
-                  x1="310"
-                  y1="112"
-                  x2="365"
-                  y2="112"
-                  stroke={theme.teal}
-                  strokeWidth="1.5"
-                  opacity="0.4"
-                />
-                <circle
-                  cx="345"
-                  cy="132"
-                  r="4"
-                  fill={theme.teal}
-                  opacity="0.6"
-                />
-              </g>
-            </svg>
-          </div>
-
-          {/* Headline */}
-          <h1
-            style={{
-              fontSize: 'clamp(2rem, 8vw, 3.5rem)',
-              fontWeight: 800,
-              lineHeight: 1.1,
-              marginBottom: '1rem',
-              fontFamily: 'DM Sans, sans-serif',
-              letterSpacing: '-0.02em',
-              color: theme.stone50,
-              animation: visibleSections.hero
-                ? 'slideUp 0.8s ease-out 0.1s both'
-                : 'none',
-            }}
-          >
-            Le tue slide NotebookLM,{' '}
-            <span style={{ color: theme.teal }}>finalmente editabili</span>
-          </h1>
-
-          {/* Subheadline */}
-          <p
-            style={{
-              fontSize: 'clamp(1rem, 2.5vw, 1.25rem)',
-              lineHeight: 1.6,
-              color: theme.stone300,
-              marginBottom: '2.5rem',
-              maxWidth: '700px',
-              margin: '0 auto 2.5rem',
-              fontFamily: 'DM Sans, sans-serif',
-              fontWeight: 400,
-              animation: visibleSections.hero
-                ? 'slideUp 0.8s ease-out 0.2s both'
-                : 'none',
-            }}
-          >
-            Carica il PDF esportato da NotebookLM e ottieni un PPTX con testo, immagini
-            e layout editabili. In 30 secondi, senza rifare nulla da zero.
-          </p>
-
-          {/* CTA Buttons */}
-          <div
-            style={{
-              display: 'flex',
-              gap: '1rem',
-              justifyContent: 'center',
-              flexWrap: 'wrap',
-              animation: visibleSections.hero
-                ? 'slideUp 0.8s ease-out 0.3s both'
-                : 'none',
-            }}
-          >
-            <Link
-              href="/app"
-              style={{
-                backgroundColor: theme.amber,
-                color: theme.dark,
-                padding: '1rem 2rem',
-                borderRadius: '0.5rem',
-                textDecoration: 'none',
-                fontSize: '1.05rem',
-                fontWeight: 700,
-                fontFamily: 'DM Sans, sans-serif',
-                cursor: 'pointer',
-                border: 'none',
-                transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                boxShadow: `0 10px 30px ${theme.amber}33`,
-                display: 'inline-block',
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.backgroundColor = '#FBBF24';
-                e.target.style.boxShadow = `0 20px 50px ${theme.amber}55`;
-                e.target.style.transform = 'translateY(-2px)';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.backgroundColor = theme.amber;
-                e.target.style.boxShadow = `0 10px 30px ${theme.amber}33`;
-                e.target.style.transform = 'translateY(0)';
-              }}
-            >
-              Carica il tuo PDF
-            </Link>
-            <button
-              onClick={() => scrollToSection('how-it-works')}
-              style={{
-                backgroundColor: 'transparent',
-                color: theme.teal,
-                padding: '1rem 2rem',
-                borderRadius: '0.5rem',
-                border: `2px solid ${theme.teal}`,
-                fontSize: '1.05rem',
-                fontWeight: 700,
-                fontFamily: 'DM Sans, sans-serif',
-                cursor: 'pointer',
-                transition: 'all 0.3s',
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.backgroundColor = `${theme.teal}15`;
-                e.target.style.transform = 'translateY(-2px)';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.backgroundColor = 'transparent';
-                e.target.style.transform = 'translateY(0)';
-              }}
-            >
-              Guarda come funziona
-            </button>
-          </div>
+          <span style={{ fontSize: '0.8rem', color: theme.teal, fontWeight: 600 }}>
+            App del mese — L'Officina di La Cassetta degli AI-trezzi
+          </span>
         </div>
+
+        <h1
+          style={{
+            fontSize: 'clamp(2.25rem, 5vw, 3.75rem)',
+            fontWeight: 800,
+            color: theme.stone50,
+            lineHeight: 1.15,
+            letterSpacing: '-0.03em',
+            marginBottom: '1.5rem',
+            maxWidth: '820px',
+            margin: '0 auto 1.5rem',
+          }}
+        >
+          Le tue slide NotebookLM,{' '}
+          <span style={{ color: theme.teal }}>finalmente editabili</span>
+        </h1>
+
+        <p
+          style={{
+            fontSize: 'clamp(1.05rem, 2vw, 1.25rem)',
+            color: theme.stone400,
+            lineHeight: 1.7,
+            maxWidth: '600px',
+            margin: '0 auto 2.75rem',
+          }}
+        >
+          Carica il PDF esportato da NotebookLM &rarr; ottieni un PPTX con testo e immagini
+          editabili. In 30 secondi.
+        </p>
+
+        {/* CTA buttons */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '1rem',
+            justifyContent: 'center',
+            flexWrap: 'wrap',
+          }}
+        >
+          <Link
+            href="/app"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              backgroundColor: theme.teal,
+              color: theme.dark,
+              padding: '0.875rem 2rem',
+              borderRadius: '0.5rem',
+              fontSize: '1rem',
+              fontWeight: 700,
+              fontFamily: 'DM Sans, sans-serif',
+              textDecoration: 'none',
+              transition: 'opacity 0.2s, transform 0.2s',
+              boxShadow: `0 0 24px rgba(45, 212, 168, 0.25)`,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.opacity = '0.9';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.opacity = '1';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            Carica il tuo PDF
+            <span style={{ fontSize: '1.1rem' }}>→</span>
+          </Link>
+
+          <button
+            onClick={() => scrollToSection('pricing')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              background: 'none',
+              border: `1px solid ${theme.stone600}`,
+              color: theme.stone300,
+              padding: '0.875rem 2rem',
+              borderRadius: '0.5rem',
+              fontSize: '1rem',
+              fontWeight: 600,
+              fontFamily: 'DM Sans, sans-serif',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = theme.teal;
+              e.currentTarget.style.color = theme.teal;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = theme.stone600;
+              e.currentTarget.style.color = theme.stone300;
+            }}
+          >
+            Scopri L'Officina
+          </button>
+        </div>
+
+        {/* Social proof */}
+        <p
+          style={{
+            marginTop: '2.25rem',
+            fontSize: '0.85rem',
+            color: theme.stone500,
+          }}
+        >
+          Nessuna installazione &nbsp;·&nbsp; Funziona subito &nbsp;·&nbsp; Dati non salvati
+        </p>
       </section>
 
-      {/* Problem/Solution Section */}
+      {/* ── Problem ─────────────────────────────────────────────── */}
       <section
-        id="problem-solution"
+        id="problem"
         data-observe
         style={{
-          backgroundColor: theme.dark,
-          color: theme.stone50,
-          padding: '80px 1.5rem',
-          background: `linear-gradient(180deg, ${theme.dark} 0%, #3a3431 100%)`,
+          padding: '5rem 1.5rem',
+          backgroundColor: theme.stone800,
+          borderTop: `1px solid ${theme.stone600}`,
+          borderBottom: `1px solid ${theme.stone600}`,
+          ...fadeIn('problem'),
         }}
       >
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+        <div style={{ maxWidth: '860px', margin: '0 auto', textAlign: 'center' }}>
+          <p
+            style={{
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              letterSpacing: '0.1em',
+              color: theme.stone500,
+              textTransform: 'uppercase',
+              marginBottom: '1rem',
+            }}
+          >
+            Il problema
+          </p>
+          <h2
+            style={{
+              fontSize: 'clamp(1.75rem, 3.5vw, 2.5rem)',
+              fontWeight: 800,
+              color: theme.stone50,
+              lineHeight: 1.25,
+              letterSpacing: '-0.025em',
+              marginBottom: '1.5rem',
+            }}
+          >
+            NotebookLM genera slide bellissime —{' '}
+            <span style={{ color: '#F87171' }}>ma sono PDF piatti</span>
+          </h2>
+          <p
+            style={{
+              fontSize: '1.1rem',
+              color: theme.stone400,
+              lineHeight: 1.75,
+              marginBottom: '2rem',
+            }}
+          >
+            Immagini rasterizzate, zero testo estraibile. Ogni volta che vuoi modificare anche
+            solo un titolo, devi ricominciare da zero.
+          </p>
+
+          {/* Pain points */}
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
-              gap: '3rem',
-              marginTop: '3rem',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '1rem',
+              marginTop: '2rem',
             }}
           >
-            {/* Problem Card */}
-            <article
-              style={{
-                backgroundColor: theme.stone700,
-                backgroundImage: `linear-gradient(135deg, ${theme.stone700} 0%, ${theme.stone600} 100%)`,
-                padding: '2.5rem',
-                borderRadius: '0.75rem',
-                border: `1px solid ${theme.stone600}`,
-                backdropFilter: 'blur(10px)',
-                opacity: visibleSections['problem-solution'] ? 1 : 0,
-                transform: visibleSections['problem-solution']
-                  ? 'translateY(0)'
-                  : 'translateY(40px)',
-                transition: 'all 0.6s ease-out',
-              }}
-            >
-              <h3
+            {[
+              { icon: '🔒', text: 'Testo non selezionabile' },
+              { icon: '🖼️', text: 'Immagini non estraibili' },
+              { icon: '✏️', text: 'Nessuna modifica possibile' },
+              { icon: '⏱️', text: 'Ore perse a rifare tutto' },
+            ].map(({ icon, text }) => (
+              <div
+                key={text}
                 style={{
-                  fontSize: '1.75rem',
-                  fontWeight: 700,
-                  marginBottom: '1rem',
-                  color: '#EF4444',
-                  fontFamily: 'DM Sans, sans-serif',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  backgroundColor: theme.stone700,
+                  border: `1px solid ${theme.stone600}`,
+                  borderRadius: '0.625rem',
+                  padding: '0.875rem 1.125rem',
                 }}
               >
-                Il problema
-              </h3>
-              <p
-                style={{
-                  fontSize: '1rem',
-                  lineHeight: 1.7,
-                  color: theme.stone300,
-                  fontFamily: 'DM Sans, sans-serif',
-                }}
-              >
-                NotebookLM genera slide bellissime, ma sono PDF rasterizzati. Ogni slide è un'immagine
-                piatta — zero testo estraibile, impossibile da modificare senza rifare tutto da zero.
-              </p>
-            </article>
-
-            {/* Solution Card */}
-            <article
-              style={{
-                backgroundColor: `${theme.teal}20`,
-                background: `linear-gradient(135deg, ${theme.teal}15 0%, ${theme.teal}05 100%)`,
-                padding: '2.5rem',
-                borderRadius: '0.75rem',
-                border: `2px solid ${theme.teal}`,
-                backdropFilter: 'blur(10px)',
-                opacity: visibleSections['problem-solution'] ? 1 : 0,
-                transform: visibleSections['problem-solution']
-                  ? 'translateY(0)'
-                  : 'translateY(40px)',
-                transition: 'all 0.6s ease-out 0.1s',
-              }}
-            >
-              <h3
-                style={{
-                  fontSize: '1.75rem',
-                  fontWeight: 700,
-                  marginBottom: '1rem',
-                  color: theme.teal,
-                  fontFamily: 'DM Sans, sans-serif',
-                }}
-              >
-                La soluzione
-              </h3>
-              <p
-                style={{
-                  fontSize: '1rem',
-                  lineHeight: 1.7,
-                  color: theme.stone300,
-                  fontFamily: 'DM Sans, sans-serif',
-                }}
-              >
-                SlideForge usa AI Vision per riconoscere testo, immagini e layout dalle tue slide
-                NotebookLM. Li ricostruisce come elementi editabili in un PPTX perfetto.
-              </p>
-            </article>
+                <span style={{ fontSize: '1.25rem' }}>{icon}</span>
+                <span style={{ fontSize: '0.9rem', color: theme.stone300, fontWeight: 500 }}>
+                  {text}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* How It Works Section */}
+      {/* ── How it works ────────────────────────────────────────── */}
       <section
         id="how-it-works"
         data-observe
         style={{
-          backgroundColor: theme.dark,
-          color: theme.stone50,
-          padding: '80px 1.5rem',
-          background: `linear-gradient(180deg, #3a3431 0%, ${theme.dark} 100%)`,
+          padding: '6rem 1.5rem',
+          maxWidth: '1200px',
+          margin: '0 auto',
+          ...fadeIn('how-it-works'),
         }}
       >
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <h2
+        <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
+          <p
             style={{
-              fontSize: 'clamp(2rem, 5vw, 2.75rem)',
-              fontWeight: 800,
-              textAlign: 'center',
-              marginBottom: '0.5rem',
-              fontFamily: 'DM Sans, sans-serif',
-              letterSpacing: '-0.02em',
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              letterSpacing: '0.1em',
+              color: theme.teal,
+              textTransform: 'uppercase',
+              marginBottom: '0.75rem',
             }}
           >
             Come funziona
-          </h2>
-          <p
-            style={{
-              fontSize: '1.1rem',
-              textAlign: 'center',
-              color: theme.stone400,
-              marginBottom: '3.5rem',
-              fontFamily: 'DM Sans, sans-serif',
-            }}
-          >
-            Tre semplici step
           </p>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-              gap: '2rem',
-            }}
-          >
-            {[
-              {
-                number: '1',
-                title: 'Carica il PDF da NotebookLM',
-                description: 'Seleziona il PDF esportato dalle tue slide',
-              },
-              {
-                number: '2',
-                title: "L'AI riconosce testo e immagini",
-                description:
-                  'AI Vision estrae ogni elemento dalla slide rasterizzata',
-              },
-              {
-                number: '3',
-                title: 'Scarica il PPTX editabile',
-                description:
-                  'Modifica il testo nell\'editor e esporta in PowerPoint',
-              },
-            ].map((step, idx) => (
-              <article
-                key={idx}
-                data-observe
-                id={`step-${idx}`}
-                style={{
-                  backgroundColor: theme.stone700,
-                  backgroundImage: `linear-gradient(135deg, ${theme.stone700} 0%, ${theme.stone600} 100%)`,
-                  padding: '2rem',
-                  borderRadius: '0.75rem',
-                  border: `1px solid ${theme.stone600}`,
-                  position: 'relative',
-                  overflow: 'hidden',
-                  opacity: visibleSections['how-it-works'] ? 1 : 0,
-                  transform: visibleSections['how-it-works']
-                    ? 'translateY(0)'
-                    : 'translateY(40px)',
-                  transition: `all 0.6s ease-out ${idx * 0.1}s`,
-                  backdropFilter: 'blur(10px)',
-                }}
-              >
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '-1px',
-                    left: '-1px',
-                    right: '-1px',
-                    height: '1px',
-                    background: `linear-gradient(90deg, transparent, ${theme.teal}, transparent)`,
-                  }}
-                />
-                <div
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    backgroundColor: theme.teal,
-                    borderRadius: '50%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '1.5rem',
-                    fontWeight: 800,
-                    color: theme.dark,
-                    marginBottom: '1rem',
-                    fontFamily: 'DM Sans, sans-serif',
-                  }}
-                >
-                  {step.number}
-                </div>
-                <h3
-                  style={{
-                    fontSize: '1.25rem',
-                    fontWeight: 700,
-                    marginBottom: '0.75rem',
-                    fontFamily: 'DM Sans, sans-serif',
-                  }}
-                >
-                  {step.title}
-                </h3>
-                <p
-                  style={{
-                    fontSize: '0.95rem',
-                    color: theme.stone400,
-                    lineHeight: 1.6,
-                    fontFamily: 'DM Sans, sans-serif',
-                  }}
-                >
-                  {step.description}
-                </p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section
-        id="features"
-        data-observe
-        style={{
-          backgroundColor: theme.dark,
-          color: theme.stone50,
-          padding: '80px 1.5rem',
-          background: `linear-gradient(180deg, ${theme.dark} 0%, #3a3431 100%)`,
-        }}
-      >
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
           <h2
             style={{
-              fontSize: 'clamp(2rem, 5vw, 2.75rem)',
+              fontSize: 'clamp(1.75rem, 3.5vw, 2.5rem)',
               fontWeight: 800,
-              textAlign: 'center',
-              marginBottom: '0.5rem',
-              fontFamily: 'DM Sans, sans-serif',
-              letterSpacing: '-0.02em',
+              color: theme.stone50,
+              letterSpacing: '-0.025em',
+              lineHeight: 1.2,
             }}
           >
-            Funzionalità potenti
+            Tre passi. Trenta secondi.
           </h2>
-          <p
-            style={{
-              fontSize: '1.1rem',
-              textAlign: 'center',
-              color: theme.stone400,
-              marginBottom: '3.5rem',
-              fontFamily: 'DM Sans, sans-serif',
-            }}
-          >
-            Tutto quello che serve
-          </p>
+        </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gap: '1.5rem',
-            }}
-          >
-            {[
-              {
-                icon: '🤖',
-                title: 'AI Vision multi-modello',
-                desc: 'Nemotron, Gemini, Qwen e altri',
-              },
-              {
-                icon: '✏️',
-                title: 'Editor visuale',
-                desc: 'Drag & resize di testo e forme',
-              },
-              {
-                icon: '📊',
-                title: 'Export PPTX nativo',
-                desc: 'PptxGenJS con full compatibility',
-              },
-              {
-                icon: '🔓',
-                title: 'OCR offline',
-                desc: 'Tesseract per funzionamento senza AI',
-              },
-              {
-                icon: '💻',
-                title: 'Browser-based',
-                desc: 'Nessuna installazione, tutto nel browser',
-              },
-              {
-                icon: '🔒',
-                title: 'Privacy-first',
-                desc: 'File non lasciano mai il tuo dispositivo',
-              },
-            ].map((feat, idx) => (
-              <article
-                key={idx}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: '1.5rem',
+          }}
+        >
+          {[
+            {
+              step: '01',
+              title: 'Carica il PDF da NotebookLM',
+              description:
+                'Esporta le slide da NotebookLM come PDF e caricale direttamente su SlideForge. Nessuna configurazione richiesta.',
+              icon: '📄',
+            },
+            {
+              step: '02',
+              title: "L'AI riconosce testo e immagini",
+              description:
+                "Gemini 2.5 Flash analizza ogni pagina, estrae il testo con precisione e isola le immagini mantenendo il layout originale.",
+              icon: '🔍',
+            },
+            {
+              step: '03',
+              title: 'Scarica il PPTX editabile',
+              description:
+                'In pochi secondi ottieni un file PowerPoint con testo modificabile, immagini separate e formattazione pulita.',
+              icon: '📥',
+            },
+          ].map(({ step, title, description, icon }, idx) => (
+            <div
+              key={step}
+              style={{
+                position: 'relative',
+                backgroundColor: theme.stone800,
+                border: `1px solid ${theme.stone600}`,
+                borderRadius: '0.875rem',
+                padding: '2rem',
+                transition: 'border-color 0.2s, transform 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = theme.tealBorder;
+                e.currentTarget.style.transform = 'translateY(-3px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = theme.stone600;
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              <div
                 style={{
-                  backgroundColor: `${theme.teal}08`,
-                  border: `1px solid ${theme.teal}30`,
-                  padding: '1.75rem',
-                  borderRadius: '0.625rem',
-                  backdropFilter: 'blur(10px)',
-                  opacity: visibleSections.features ? 1 : 0,
-                  transform: visibleSections.features
-                    ? 'translateY(0)'
-                    : 'translateY(20px)',
-                  transition: `all 0.5s ease-out ${idx * 0.05}s`,
-                  hoverEffects: true,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = theme.teal;
-                  e.currentTarget.style.backgroundColor = `${theme.teal}15`;
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = `${theme.teal}30`;
-                  e.currentTarget.style.backgroundColor = `${theme.teal}08`;
-                  e.currentTarget.style.transform = 'translateY(0)';
+                  position: 'absolute',
+                  top: '1.5rem',
+                  right: '1.5rem',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  color: theme.stone500,
+                  letterSpacing: '0.05em',
                 }}
               >
-                <div
-                  style={{
-                    fontSize: '2rem',
-                    marginBottom: '0.75rem',
-                  }}
-                >
-                  {feat.icon}
-                </div>
-                <h3
-                  style={{
-                    fontSize: '1rem',
-                    fontWeight: 700,
-                    marginBottom: '0.5rem',
-                    fontFamily: 'DM Sans, sans-serif',
-                  }}
-                >
-                  {feat.title}
-                </h3>
-                <p
-                  style={{
-                    fontSize: '0.875rem',
-                    color: theme.stone400,
-                    lineHeight: 1.5,
-                    fontFamily: 'DM Sans, sans-serif',
-                  }}
-                >
-                  {feat.desc}
-                </p>
-              </article>
-            ))}
-          </div>
+                {step}
+              </div>
+              <div
+                style={{
+                  fontSize: '2.25rem',
+                  marginBottom: '1rem',
+                }}
+              >
+                {icon}
+              </div>
+              <h3
+                style={{
+                  fontSize: '1.1rem',
+                  fontWeight: 700,
+                  color: theme.stone50,
+                  marginBottom: '0.625rem',
+                  lineHeight: 1.3,
+                }}
+              >
+                {title}
+              </h3>
+              <p
+                style={{
+                  fontSize: '0.9rem',
+                  color: theme.stone400,
+                  lineHeight: 1.7,
+                }}
+              >
+                {description}
+              </p>
+            </div>
+          ))}
         </div>
       </section>
 
-      {/* Pricing Section */}
+      {/* ── Pricing ─────────────────────────────────────────────── */}
       <section
         id="pricing"
         data-observe
         style={{
-          backgroundColor: theme.dark,
-          color: theme.stone50,
-          padding: '80px 1.5rem',
-          background: `linear-gradient(180deg, #3a3431 0%, ${theme.dark} 100%)`,
+          padding: '6rem 1.5rem',
+          backgroundColor: theme.stone800,
+          borderTop: `1px solid ${theme.stone600}`,
+          ...fadeIn('pricing'),
         }}
       >
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <h2
-            style={{
-              fontSize: 'clamp(2rem, 5vw, 2.75rem)',
-              fontWeight: 800,
-              textAlign: 'center',
-              marginBottom: '0.5rem',
-              fontFamily: 'DM Sans, sans-serif',
-              letterSpacing: '-0.02em',
-            }}
-          >
-            Piani semplici e trasparenti
-          </h2>
-          <p
-            style={{
-              fontSize: '1.1rem',
-              textAlign: 'center',
-              color: theme.stone400,
-              marginBottom: '2rem',
-              fontFamily: 'DM Sans, sans-serif',
-            }}
-          >
-            Scegli quello che fa per te
-          </p>
-
-          <div
-            style={{
-              backgroundColor: `${theme.teal}15`,
-              border: `1px solid ${theme.teal}50`,
-              borderRadius: '0.5rem',
-              padding: '1rem 1.5rem',
-              textAlign: 'center',
-              marginBottom: '2.5rem',
-              fontFamily: 'DM Sans, sans-serif',
-              fontSize: '0.95rem',
-              color: theme.stone300,
-            }}
-          >
-            Sei un abbonato de{' '}
-            <span style={{ color: theme.teal, fontWeight: 700 }}>
-              La Cassetta degli AI-trezzi
-            </span>
-            ? Accedi con la tua email per sbloccare il piano Pro gratuitamente.
+        <div style={{ maxWidth: '960px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
+            <p
+              style={{
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                letterSpacing: '0.1em',
+                color: theme.teal,
+                textTransform: 'uppercase',
+                marginBottom: '0.75rem',
+              }}
+            >
+              L'Officina
+            </p>
+            <h2
+              style={{
+                fontSize: 'clamp(1.75rem, 3.5vw, 2.5rem)',
+                fontWeight: 800,
+                color: theme.stone50,
+                letterSpacing: '-0.025em',
+                lineHeight: 1.2,
+                marginBottom: '1rem',
+              }}
+            >
+              Un'app AI professionale ogni mese
+            </h2>
+            <p
+              style={{
+                fontSize: '1.05rem',
+                color: theme.stone400,
+                maxWidth: '520px',
+                margin: '0 auto',
+                lineHeight: 1.65,
+              }}
+            >
+              Iscriviti a L'Officina di La Cassetta degli AI-trezzi e ottieni accesso a
+              SlideForge — e a ogni nuova app che rilasciamo.
+            </p>
           </div>
 
           <div
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-              gap: '2rem',
-              marginTop: '2rem',
-            }}
-          >
-            {[
-              {
-                name: 'FREE',
-                price: '€0',
-                period: '',
-                features: [
-                  '3 pagine/PDF',
-                  'OCR offline',
-                  'Export con watermark',
-                ],
-                cta: 'Carica il tuo PDF',
-                highlighted: false,
-              },
-              {
-                name: 'PRO',
-                price: '€9.99',
-                period: '/mese',
-                description: 'Gratuito per gli abbonati de La Cassetta degli AI-trezzi',
-                features: [
-                  '50 pagine/PDF',
-                  'AI Vision (4 modelli)',
-                  'Nessun watermark',
-                  'Drag & resize testo',
-                  'Supporto email',
-                ],
-                cta: 'Accedi con email',
-                highlighted: true,
-              },
-              {
-                name: 'ENTERPRISE',
-                price: '€29.99',
-                period: '/mese',
-                features: [
-                  '200 pagine/PDF',
-                  'Tutti i modelli AI',
-                  'API REST dedicata',
-                  'Batch processing',
-                  'Brand personalizzato',
-                  'Supporto prioritario',
-                ],
-                cta: 'Contattaci',
-                highlighted: false,
-              },
-            ].map((plan, idx) => (
-              <article
-                key={idx}
-                style={{
-                  backgroundColor: plan.highlighted
-                    ? `${theme.teal}15`
-                    : theme.stone700,
-                  background: plan.highlighted
-                    ? `linear-gradient(135deg, ${theme.teal}15 0%, ${theme.teal}05 100%)`
-                    : `linear-gradient(135deg, ${theme.stone700} 0%, ${theme.stone600} 100%)`,
-                  border: plan.highlighted
-                    ? `2px solid ${theme.teal}`
-                    : `1px solid ${theme.stone600}`,
-                  padding: '2.5rem',
-                  borderRadius: '0.75rem',
-                  position: 'relative',
-                  opacity: visibleSections.pricing ? 1 : 0,
-                  transform: visibleSections.pricing
-                    ? 'translateY(0) scale(1)'
-                    : 'translateY(40px) scale(0.95)',
-                  transition: `all 0.6s ease-out ${idx * 0.1}s`,
-                  backdropFilter: 'blur(10px)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-              >
-                {plan.highlighted && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: '-12px',
-                      left: '50%',
-                      transform: 'translateX(-50%)',
-                      backgroundColor: theme.amber,
-                      color: theme.dark,
-                      padding: '0.375rem 1rem',
-                      borderRadius: '0.25rem',
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
-                      fontFamily: 'DM Sans, sans-serif',
-                      letterSpacing: '0.05em',
-                    }}
-                  >
-                    PIÙ POPOLARE
-                  </div>
-                )}
-
-                <h3
-                  style={{
-                    fontSize: '1.5rem',
-                    fontWeight: 700,
-                    marginBottom: '0.5rem',
-                    fontFamily: 'DM Sans, sans-serif',
-                  }}
-                >
-                  {plan.name}
-                </h3>
-
-                <div style={{ marginBottom: '1.5rem' }}>
-                  <div
-                    style={{
-                      fontSize: '2.75rem',
-                      fontWeight: 800,
-                      fontFamily: 'DM Sans, sans-serif',
-                    }}
-                  >
-                    {plan.price}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: '0.875rem',
-                      color: theme.stone400,
-                      fontFamily: 'DM Sans, sans-serif',
-                    }}
-                  >
-                    {plan.period}
-                  </div>
-                  {plan.description && (
-                    <div
-                      style={{
-                        marginTop: '0.625rem',
-                        fontSize: '0.8rem',
-                        color: theme.teal,
-                        fontFamily: 'DM Sans, sans-serif',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {plan.description}
-                    </div>
-                  )}
-                </div>
-
-                <ul
-                  style={{
-                    flex: 1,
-                    listStyle: 'none',
-                    padding: 0,
-                    marginBottom: '2rem',
-                  }}
-                >
-                  {plan.features.map((feature, fidx) => (
-                    <li
-                      key={fidx}
-                      style={{
-                        fontSize: '0.95rem',
-                        padding: '0.75rem 0',
-                        color: theme.stone300,
-                        borderBottom: `1px solid ${theme.stone600}`,
-                        fontFamily: 'DM Sans, sans-serif',
-                        display: 'flex',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <span
-                        style={{
-                          color: theme.teal,
-                          marginRight: '0.75rem',
-                          fontSize: '1.1rem',
-                        }}
-                      >
-                        ✓
-                      </span>
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
-
-                {plan.name === 'PRO' ? (
-                  <button
-                    onClick={() => setShowLoginModal(true)}
-                    style={{
-                      backgroundColor: theme.amber,
-                      color: theme.dark,
-                      border: 'none',
-                      padding: '0.875rem 1.5rem',
-                      borderRadius: '0.375rem',
-                      fontSize: '0.95rem',
-                      fontWeight: 700,
-                      fontFamily: 'DM Sans, sans-serif',
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      transition: 'all 0.3s',
-                      display: 'inline-block',
-                      width: '100%',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.backgroundColor = '#FBBF24';
-                      e.target.style.transform = 'translateY(-2px)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.backgroundColor = theme.amber;
-                      e.target.style.transform = 'translateY(0)';
-                    }}
-                  >
-                    {plan.cta}
-                  </button>
-                ) : (
-                  <Link
-                    href={plan.name === 'FREE' ? '/app' : '#'}
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: theme.teal,
-                      border: `2px solid ${theme.teal}`,
-                      padding: '0.875rem 1.5rem',
-                      borderRadius: '0.375rem',
-                      textDecoration: 'none',
-                      fontSize: '0.95rem',
-                      fontWeight: 700,
-                      fontFamily: 'DM Sans, sans-serif',
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      transition: 'all 0.3s',
-                      display: 'inline-block',
-                      width: '100%',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.backgroundColor = `${theme.teal}20`;
-                      e.target.style.transform = 'translateY(-2px)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.backgroundColor = 'transparent';
-                      e.target.style.transform = 'translateY(0)';
-                    }}
-                  >
-                    {plan.cta}
-                  </Link>
-                )}
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Social Proof / Trust Section */}
-      <section
-        id="trust"
-        data-observe
-        style={{
-          backgroundColor: theme.dark,
-          color: theme.stone50,
-          padding: '80px 1.5rem',
-          textAlign: 'center',
-          background: `linear-gradient(180deg, ${theme.dark} 0%, #3a3431 100%)`,
-        }}
-      >
-        <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-          <h2
-            style={{
-              fontSize: 'clamp(1.75rem, 4vw, 2.5rem)',
-              fontWeight: 800,
-              marginBottom: '1rem',
-              fontFamily: 'DM Sans, sans-serif',
-              letterSpacing: '-0.02em',
-            }}
-          >
-            Pensato per chi lavora con le slide ogni giorno
-          </h2>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
               gap: '1.5rem',
-              marginTop: '3rem',
+              alignItems: 'start',
             }}
           >
-            {[
-              { emoji: '💼', label: 'Consulenti' },
-              { emoji: '🎓', label: 'Formatori' },
-              { emoji: '🏢', label: 'PMI' },
-              { emoji: '🏛️', label: 'Pubblica Amministrazione' },
-            ].map((target, idx) => (
-              <div
-                key={idx}
-                style={{
-                  backgroundColor: theme.stone700,
-                  backgroundImage: `linear-gradient(135deg, ${theme.stone700} 0%, ${theme.stone600} 100%)`,
-                  padding: '2rem',
-                  borderRadius: '0.625rem',
-                  border: `1px solid ${theme.stone600}`,
-                  opacity: visibleSections.trust ? 1 : 0,
-                  transform: visibleSections.trust
-                    ? 'translateY(0)'
-                    : 'translateY(20px)',
-                  transition: `all 0.5s ease-out ${idx * 0.08}s`,
-                }}
-              >
-                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>
-                  {target.emoji}
-                </div>
-                <div
-                  style={{
-                    fontSize: '1rem',
-                    fontWeight: 600,
-                    fontFamily: 'DM Sans, sans-serif',
-                  }}
-                >
-                  {target.label}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              gap: '1.5rem',
-              justifyContent: 'center',
-              flexWrap: 'wrap',
-              marginTop: '4rem',
-            }}
-          >
-            {[
-              '🇮🇹 Made in Italy',
-              '🔒 Privacy-first',
-              '⚡ No server-side processing',
-              '🧰 La Cassetta degli AI-trezzi',
-            ].map((badge, idx) => (
-              <div
-                key={idx}
-                style={{
-                  backgroundColor: `${theme.teal}20`,
-                  border: `1px solid ${theme.teal}40`,
-                  padding: '0.75rem 1.5rem',
-                  borderRadius: '0.375rem',
-                  fontSize: '0.95rem',
-                  fontWeight: 600,
-                  fontFamily: 'DM Sans, sans-serif',
-                  opacity: visibleSections.trust ? 1 : 0,
-                  transform: visibleSections.trust
-                    ? 'scale(1)'
-                    : 'scale(0.9)',
-                  transition: `all 0.5s ease-out ${0.3 + idx * 0.1}s`,
-                }}
-              >
-                {badge}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer
-        style={{
-          backgroundColor: theme.stone700,
-          color: theme.stone400,
-          padding: '3rem 1.5rem',
-          borderTop: `1px solid ${theme.stone600}`,
-        }}
-      >
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-              gap: '2rem',
-              marginBottom: '2rem',
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: '1.25rem',
-                  fontWeight: 700,
-                  color: theme.teal,
-                  marginBottom: '0.5rem',
-                  fontFamily: 'DM Sans, sans-serif',
-                }}
-              >
-                SlideForge
-              </div>
+            {/* Free plan */}
+            <div
+              style={{
+                backgroundColor: theme.stone700,
+                border: `1px solid ${theme.stone600}`,
+                borderRadius: '1rem',
+                padding: '2rem',
+              }}
+            >
               <p
                 style={{
-                  fontSize: '0.9rem',
-                  lineHeight: 1.6,
-                  fontFamily: 'DM Sans, sans-serif',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  color: theme.stone400,
+                  marginBottom: '0.5rem',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
                 }}
               >
-                Uno strumento de La Cassetta degli AI-trezzi
+                Prova gratuita
+              </p>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: '0.375rem',
+                  marginBottom: '1.5rem',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: '2.5rem',
+                    fontWeight: 800,
+                    color: theme.stone50,
+                    letterSpacing: '-0.03em',
+                  }}
+                >
+                  €0
+                </span>
+              </div>
+              <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 2rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {[
+                  'Fino a 3 pagine per PDF',
+                  'OCR offline (Tesseract)',
+                  'Export PPTX',
+                  'Nessuna registrazione',
+                ].map((feat) => (
+                  <li
+                    key={feat}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.625rem',
+                      fontSize: '0.9rem',
+                      color: theme.stone400,
+                    }}
+                  >
+                    <span style={{ color: theme.stone500, fontSize: '1rem' }}>·</span>
+                    {feat}
+                  </li>
+                ))}
+              </ul>
+              <Link
+                href="/app"
+                style={{
+                  display: 'block',
+                  textAlign: 'center',
+                  border: `1px solid ${theme.stone600}`,
+                  color: theme.stone300,
+                  padding: '0.75rem',
+                  borderRadius: '0.5rem',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
+                  fontFamily: 'DM Sans, sans-serif',
+                  textDecoration: 'none',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = theme.stone400;
+                  e.currentTarget.style.color = theme.stone50;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = theme.stone600;
+                  e.currentTarget.style.color = theme.stone300;
+                }}
+              >
+                Prova gratis
+              </Link>
+            </div>
+
+            {/* Paid plan */}
+            <div
+              style={{
+                backgroundColor: theme.dark,
+                border: `2px solid ${theme.teal}`,
+                borderRadius: '1rem',
+                padding: '2rem',
+                position: 'relative',
+                boxShadow: `0 0 40px rgba(45, 212, 168, 0.1)`,
+              }}
+            >
+              {/* Badge */}
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '-0.875rem',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  backgroundColor: theme.teal,
+                  color: theme.dark,
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  padding: '0.25rem 0.875rem',
+                  borderRadius: '999px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Questo mese: SlideForge
+              </div>
+
+              <p
+                style={{
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  color: theme.teal,
+                  marginBottom: '0.5rem',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                L'Officina
+              </p>
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: '0.375rem',
+                  marginBottom: '0.5rem',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: '2.75rem',
+                    fontWeight: 800,
+                    color: theme.stone50,
+                    letterSpacing: '-0.03em',
+                  }}
+                >
+                  €11.90
+                </span>
+                <span style={{ fontSize: '0.95rem', color: theme.stone400 }}>/mese</span>
+              </div>
+
+              <p
+                style={{
+                  fontSize: '0.85rem',
+                  color: theme.stone400,
+                  marginBottom: '1.5rem',
+                  lineHeight: 1.5,
+                }}
+              >
+                Ogni mese una nuova app AI professionale. SlideForge &egrave; quella di{' '}
+                {new Date().toLocaleString('it-IT', { month: 'long', year: 'numeric' })}.
+              </p>
+
+              <ul
+                style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: '0 0 2rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.75rem',
+                }}
+              >
+                {[
+                  'Fino a 50 pagine per PDF',
+                  'AI Vision — Gemini 2.5 Flash',
+                  'Riconoscimento testo e immagini',
+                  'Export PPTX editabile',
+                  'Nessun watermark',
+                  'Accesso a tutte le app precedenti',
+                ].map((feat) => (
+                  <li
+                    key={feat}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.625rem',
+                      fontSize: '0.9rem',
+                      color: theme.stone300,
+                    }}
+                  >
+                    <span style={{ color: theme.teal, fontSize: '0.9rem', fontWeight: 700 }}>
+                      ✓
+                    </span>
+                    {feat}
+                  </li>
+                ))}
+              </ul>
+
+              <a
+                href="#"
+                style={{
+                  display: 'block',
+                  textAlign: 'center',
+                  backgroundColor: theme.teal,
+                  color: theme.dark,
+                  padding: '0.875rem',
+                  borderRadius: '0.5rem',
+                  fontSize: '1rem',
+                  fontWeight: 700,
+                  fontFamily: 'DM Sans, sans-serif',
+                  textDecoration: 'none',
+                  transition: 'opacity 0.2s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.85')}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
+              >
+                Iscriviti a L'Officina
+              </a>
+
+              <p
+                style={{
+                  textAlign: 'center',
+                  fontSize: '0.8rem',
+                  color: theme.stone500,
+                  marginTop: '0.875rem',
+                }}
+              >
+                Già iscritto?{' '}
+                <button
+                  onClick={() => setShowLoginModal(true)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: theme.teal,
+                    cursor: 'pointer',
+                    fontSize: '0.8rem',
+                    fontFamily: 'DM Sans, sans-serif',
+                    padding: 0,
+                    textDecoration: 'underline',
+                    textUnderlineOffset: '2px',
+                  }}
+                >
+                  Accedi qui
+                </button>
               </p>
             </div>
-
-            <div>
-              <h4
-                style={{
-                  fontSize: '0.95rem',
-                  fontWeight: 700,
-                  marginBottom: '1rem',
-                  color: theme.stone50,
-                  fontFamily: 'DM Sans, sans-serif',
-                }}
-              >
-                Link legali
-              </h4>
-              <ul style={{ listStyle: 'none', padding: 0 }}>
-                <li style={{ marginBottom: '0.5rem' }}>
-                  <a
-                    href="#"
-                    style={{
-                      color: theme.stone400,
-                      textDecoration: 'none',
-                      fontSize: '0.9rem',
-                      fontFamily: 'DM Sans, sans-serif',
-                      transition: 'color 0.3s',
-                    }}
-                    onMouseEnter={(e) => (e.target.style.color = theme.teal)}
-                    onMouseLeave={(e) => (e.target.style.color = theme.stone400)}
-                  >
-                    Privacy Policy
-                  </a>
-                </li>
-                <li style={{ marginBottom: '0.5rem' }}>
-                  <a
-                    href="#"
-                    style={{
-                      color: theme.stone400,
-                      textDecoration: 'none',
-                      fontSize: '0.9rem',
-                      fontFamily: 'DM Sans, sans-serif',
-                      transition: 'color 0.3s',
-                    }}
-                    onMouseEnter={(e) => (e.target.style.color = theme.teal)}
-                    onMouseLeave={(e) => (e.target.style.color = theme.stone400)}
-                  >
-                    Termini di Servizio
-                  </a>
-                </li>
-              </ul>
-            </div>
-
-            <div>
-              <h4
-                style={{
-                  fontSize: '0.95rem',
-                  fontWeight: 700,
-                  marginBottom: '1rem',
-                  color: theme.stone50,
-                  fontFamily: 'DM Sans, sans-serif',
-                }}
-              >
-                Contatti
-              </h4>
-              <a
-                href="mailto:info@slideforge.io"
-                style={{
-                  color: theme.stone400,
-                  textDecoration: 'none',
-                  fontSize: '0.9rem',
-                  fontFamily: 'DM Sans, sans-serif',
-                  transition: 'color 0.3s',
-                }}
-                onMouseEnter={(e) => (e.target.style.color = theme.teal)}
-                onMouseLeave={(e) => (e.target.style.color = theme.stone400)}
-              >
-                info@slideforge.io
-              </a>
-            </div>
           </div>
+        </div>
+      </section>
 
-          <div
+      {/* ── FAQ ─────────────────────────────────────────────────── */}
+      <section
+        id="faq"
+        data-observe
+        style={{
+          padding: '6rem 1.5rem',
+          maxWidth: '720px',
+          margin: '0 auto',
+          ...fadeIn('faq'),
+        }}
+      >
+        <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
+          <h2
             style={{
-              borderTop: `1px solid ${theme.stone600}`,
-              paddingTop: '1.5rem',
-              textAlign: 'center',
-              fontSize: '0.85rem',
-              fontFamily: 'DM Sans, sans-serif',
+              fontSize: 'clamp(1.5rem, 3vw, 2rem)',
+              fontWeight: 800,
+              color: theme.stone50,
+              letterSpacing: '-0.025em',
             }}
           >
-            © 2026 Valentino Grossi. Tutti i diritti riservati.
+            Domande frequenti
+          </h2>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {[
+            {
+              q: 'Funziona solo con NotebookLM?',
+              a: "SlideForge funziona con qualsiasi PDF di presentazione. L'integrazione con NotebookLM è ottimizzata perché è il caso d'uso più comune, ma puoi usarlo con qualsiasi PDF di slide.",
+            },
+            {
+              q: 'I miei file vengono salvati?',
+              a: 'No. Il PDF viene elaborato in memoria e il PPTX generato viene inviato direttamente al tuo browser. Non conserviamo nessun contenuto dei tuoi documenti.',
+            },
+            {
+              q: 'Qual è la differenza tra OCR offline e AI Vision?',
+              a: "L'OCR offline (Tesseract) funziona senza connessione e ha qualità base: riconosce il testo ma può sbagliare con font particolari. AI Vision usa Gemini 2.5 Flash e riconosce testo, tabelle, formule e layout complessi con precisione molto maggiore.",
+            },
+            {
+              q: "Come funziona L'Officina?",
+              a: "L'Officina è un abbonamento mensile a €11.90 che ti dà accesso a tutte le app che costruiamo per gli iscritti de La Cassetta degli AI-trezzi. Ogni mese una nuova app professionale. SlideForge è quella attuale.",
+            },
+          ].map(({ q, a }) => (
+            <FaqItem key={q} question={q} answer={a} theme={theme} />
+          ))}
+        </div>
+      </section>
+
+      {/* ── Footer ──────────────────────────────────────────────── */}
+      <footer
+        style={{
+          borderTop: `1px solid ${theme.stone600}`,
+          padding: '3rem 1.5rem',
+          backgroundColor: theme.stone800,
+        }}
+      >
+        <div
+          style={{
+            maxWidth: '1200px',
+            margin: '0 auto',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '1.25rem',
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '1.125rem', fontWeight: 700, color: theme.teal }}>
+              SlideForge
+            </span>
+            <span style={{ color: theme.stone500, fontSize: '0.875rem' }}>fa parte de</span>
+            <span style={{ fontSize: '0.875rem', color: theme.stone300, fontWeight: 600 }}>
+              La Cassetta degli AI-trezzi
+            </span>
           </div>
+
+          <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <a
+              href="https://lacassettadegliaitrezzi.it"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontSize: '0.85rem',
+                color: theme.stone400,
+                textDecoration: 'none',
+                transition: 'color 0.2s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = theme.teal)}
+              onMouseLeave={(e) => (e.currentTarget.style.color = theme.stone400)}
+            >
+              Newsletter
+            </a>
+            <button
+              onClick={() => scrollToSection('pricing')}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '0.85rem',
+                color: theme.stone400,
+                cursor: 'pointer',
+                fontFamily: 'DM Sans, sans-serif',
+                padding: 0,
+                transition: 'color 0.2s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = theme.teal)}
+              onMouseLeave={(e) => (e.currentTarget.style.color = theme.stone400)}
+            >
+              L'Officina
+            </button>
+            <Link
+              href="/app"
+              style={{
+                fontSize: '0.85rem',
+                color: theme.stone400,
+                textDecoration: 'none',
+                transition: 'color 0.2s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = theme.teal)}
+              onMouseLeave={(e) => (e.currentTarget.style.color = theme.stone400)}
+            >
+              Prova gratis
+            </Link>
+          </div>
+
+          <p style={{ fontSize: '0.8rem', color: theme.stone500 }}>
+            Costruito con AI &nbsp;·&nbsp; &copy; {new Date().getFullYear()} La Cassetta degli AI-trezzi
+          </p>
         </div>
       </footer>
 
-      {/* Login Modal */}
-      <LoginModal
-        isOpen={showLoginModal}
-        onClose={() => setShowLoginModal(false)}
-        onLogin={handleLogin}
-      />
+      {/* ── Login Modal ─────────────────────────────────────────── */}
+      {showLoginModal && (
+        <LoginModal
+          onClose={() => setShowLoginModal(false)}
+          onLogin={handleLogin}
+        />
+      )}
+    </div>
+  );
+};
 
-      {/* Global Keyframe Animations */}
-      <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
+/* ── FAQ accordion item ─────────────────────────────────────── */
+const FaqItem = ({ question, answer, theme }) => {
+  const [open, setOpen] = useState(false);
 
-        @keyframes slideUp {
-          from {
-            opacity: 0;
-            transform: translateY(30px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        @keyframes slideInLeft {
-          from {
-            opacity: 0;
-            transform: translateX(-50px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
-
-        @keyframes slideInRight {
-          from {
-            opacity: 0;
-            transform: translateX(50px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
-
-        @keyframes float {
-          0%, 100% {
-            transform: translateY(0px);
-          }
-          50% {
-            transform: translateY(30px);
-          }
-        }
-
-        @keyframes pulse {
-          0%, 100% {
-            opacity: 1;
-          }
-          50% {
-            opacity: 0.7;
-          }
-        }
-
-        @keyframes twinkle {
-          0%, 100% {
-            opacity: 0;
-          }
-          50% {
-            opacity: 0.8;
-          }
-        }
-
-        * {
-          box-sizing: border-box;
-        }
-
-        html {
-          scroll-behavior: smooth;
-        }
-
-        body {
-          margin: 0;
-          padding: 0;
-          background-color: #292524;
-          color: #fafafa;
-          font-family: 'DM Sans', sans-serif;
-          overflow-x: hidden;
-        }
-
-        a {
-          outline: none;
-        }
-
-        button {
-          outline: none;
-        }
-
-        button:focus {
-          outline: none;
-        }
-
-        a:focus {
-          outline: none;
-        }
-      `}</style>
+  return (
+    <div
+      style={{
+        backgroundColor: theme.stone800,
+        border: `1px solid ${open ? theme.tealBorder : theme.stone600}`,
+        borderRadius: '0.75rem',
+        overflow: 'hidden',
+        transition: 'border-color 0.2s',
+      }}
+    >
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: '100%',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '1.125rem 1.375rem',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          fontFamily: 'DM Sans, sans-serif',
+          textAlign: 'left',
+          gap: '1rem',
+        }}
+      >
+        <span
+          style={{
+            fontSize: '0.95rem',
+            fontWeight: 600,
+            color: open ? theme.stone50 : theme.stone300,
+            transition: 'color 0.2s',
+          }}
+        >
+          {question}
+        </span>
+        <span
+          style={{
+            color: theme.teal,
+            fontSize: '1.1rem',
+            flexShrink: 0,
+            transform: open ? 'rotate(45deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s',
+          }}
+        >
+          +
+        </span>
+      </button>
+      {open && (
+        <div
+          style={{
+            padding: '0 1.375rem 1.125rem',
+          }}
+        >
+          <p
+            style={{
+              fontSize: '0.9rem',
+              color: theme.stone400,
+              lineHeight: 1.75,
+              margin: 0,
+            }}
+          >
+            {answer}
+          </p>
+        </div>
+      )}
     </div>
   );
 };

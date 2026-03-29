@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { TIERS, getMaxPages } from '../lib/tiers';
+import { TIERS, getMaxPages, resolveTier } from '../lib/tiers';
 import { useTier } from '../lib/TierContext';
+
+// ─── CSS ─────────────────────────────────────────────────────────────────────
 
 const STYLES = `
   :root {
@@ -12,1233 +14,1498 @@ const STYLES = `
     --border: #454545;
     --text: #FFFFFF;
     --text-dim: #A9A8A7;
-    --text-muted: #9CA3AF;
     --accent: #2DD4A8;
     --accent-light: #5EEAD2;
-    --accent-dark: #0D9488;
-    --accent-glow: rgba(45, 212, 168, 0.2);
     --error: #F87171;
-    --radius: 12px;
   }
 
-  .editor-container {
+  .ed-root {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    min-height: 100vh;
     background: var(--bg);
     color: var(--text);
     font-family: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   }
 
-  .editor-header {
+  /* ── Header ── */
+  .ed-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 16px 32px;
+    padding: 14px 28px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
-    gap: 20px;
+    gap: 16px;
+    flex-wrap: wrap;
   }
 
-  .editor-title {
-    font-size: 16px;
-    font-weight: 600;
-    flex: 1;
+  .ed-logo {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.3px;
   }
 
-  .editor-buttons {
+  .ed-header-right {
     display: flex;
-    gap: 12px;
+    align-items: center;
+    gap: 10px;
   }
 
+  /* ── Buttons ── */
   .btn {
-    padding: 10px 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 18px;
     border-radius: 8px;
     border: none;
     font-family: inherit;
-    font-size: 14px;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.18s;
+    white-space: nowrap;
   }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-  .btn-export {
+  .btn-primary {
     background: var(--accent);
-    color: var(--surface);
+    color: #111;
     font-weight: 600;
-    box-shadow: 0 4px 16px rgba(45, 212, 168, 0.25);
+    box-shadow: 0 3px 12px rgba(45,212,168,0.25);
   }
-
-  .btn-export:hover:not(:disabled) {
-    transform: translateY(-2px);
+  .btn-primary:hover:not(:disabled) {
     background: var(--accent-light);
+    transform: translateY(-1px);
   }
 
-  .btn-restart {
+  .btn-ghost {
     background: transparent;
     border: 1px solid var(--border);
     color: var(--text-dim);
   }
-
-  .btn-restart:hover {
+  .btn-ghost:hover:not(:disabled) {
     border-color: var(--accent);
     color: var(--accent);
   }
 
-  .btn-cancel {
-    background: var(--error);
-    color: white;
-    font-weight: 600;
+  .btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+    border-radius: 6px;
   }
 
-  .btn-cancel:hover {
-    opacity: 0.9;
-  }
-
-  .btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .editor-main {
-    display: flex;
-    flex: 1;
-    overflow: hidden;
-  }
-
-  .editor-content {
+  /* ── Upload zone ── */
+  .ed-upload {
     display: flex;
     flex-direction: column;
-    flex: 1;
     align-items: center;
     justify-content: center;
-    padding: 40px 20px;
-    overflow-y: auto;
+    flex: 1;
+    padding: 60px 24px;
+    gap: 24px;
   }
 
-  .slide-viewport {
+  .upload-zone {
+    width: 100%;
+    max-width: 520px;
+    border: 2px dashed var(--border);
+    border-radius: 16px;
+    padding: 52px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--surface);
+  }
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(45,212,168,0.04);
+  }
+
+  .upload-icon {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 16px;
+    color: var(--accent);
+    opacity: 0.8;
+  }
+
+  .upload-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .upload-sub {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 20px;
+  }
+
+  /* ── Progress ── */
+  .ed-progress {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 20px;
+    padding: 60px 24px;
+  }
+
+  .progress-bar-track {
+    width: 340px;
+    max-width: 90vw;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+
+  .progress-label {
+    font-size: 14px;
+    color: var(--text-dim);
+  }
+
+  /* ── Slides list ── */
+  .ed-slides {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 48px;
+  }
+
+  /* ── Single slide wrapper ── */
+  .slide-wrap {
     width: 100%;
     max-width: 960px;
-    aspect-ratio: 16/9;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .slide-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 8px;
+  }
+
+  /* ── Slide canvas area ── */
+  .slide-canvas-wrap {
     position: relative;
-    overflow: hidden;
+    width: 100%;
+    aspect-ratio: 16 / 9;
     border-radius: 8px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    background: var(--surface-alt);
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    background: #000;
   }
 
-  .slide-layer {
-    position: absolute;
-    inset: 0;
-  }
-
-  .slide-bg {
+  .slide-bg-img {
+    display: block;
     width: 100%;
     height: 100%;
     object-fit: fill;
-    display: block;
+    pointer-events: none;
+    user-select: none;
   }
 
-  .text-block {
+  /* ── Ghost overlay layer ── */
+  .slide-overlay {
     position: absolute;
-    padding: 2px 4px;
-    outline: none;
-    word-wrap: break-word;
-    overflow: hidden;
-    white-space: pre-wrap;
-    cursor: text;
-    line-height: 1.25;
-    font-family: 'DM Sans', system-ui, sans-serif;
-    border-radius: 2px;
-    background: transparent;
-    transition: background 0.15s, outline 0.15s, box-shadow 0.15s;
-  }
-
-  .text-block:hover {
-    background: rgba(45, 212, 168, 0.08);
-    outline: 1.5px dashed rgba(45, 212, 168, 0.5);
-    outline-offset: -1px;
-    z-index: 5;
-  }
-
-  .text-block:focus {
-    background: rgba(255, 255, 255, 0.88);
-    outline: 2px solid var(--accent);
-    outline-offset: -1px;
-    box-shadow: 0 0 12px rgba(45, 212, 168, 0.3);
-    z-index: 10;
-    overflow: visible;
-  }
-
-  .text-block-draggable {
-    cursor: grab;
-  }
-
-  .text-block-draggable.dragging {
-    cursor: grabbing;
-    opacity: 0.9;
-    z-index: 20 !important;
-  }
-
-  .text-block-resize-handle {
-    position: absolute;
-    width: 12px;
-    height: 12px;
-    bottom: -6px;
-    right: -6px;
-    background: var(--accent);
-    border-radius: 2px;
-    cursor: nwse-resize;
-    opacity: 0;
-    transition: opacity 0.2s;
-  }
-
-  .text-block:hover .text-block-resize-handle,
-  .text-block:focus .text-block-resize-handle {
-    opacity: 1;
-  }
-
-  .shape-block {
-    position: absolute;
-    border: none;
-  }
-
-  .image-block {
-    position: absolute;
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: cover;
-  }
-
-  .nav-buttons {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-top: 24px;
-  }
-
-  .nav-btn {
-    width: 44px;
-    height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text-dim);
-    cursor: pointer;
-    font-size: 20px;
-    transition: all 0.2s;
-  }
-
-  .nav-btn:hover:not(:disabled) {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-
-  .nav-btn:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-  }
-
-  .slide-info {
-    font-size: 14px;
-    color: var(--text-dim);
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 500;
-    min-width: 60px;
-    text-align: center;
-  }
-
-  .thumbnails-strip {
-    display: flex;
-    gap: 8px;
-    overflow-x: auto;
-    padding: 12px 20px;
-    margin-top: 20px;
-    max-width: 960px;
-    border-top: 1px solid var(--border);
-  }
-
-  .thumbnail {
-    flex-shrink: 0;
-    width: 120px;
-    height: 67px;
-    border-radius: 6px;
-    border: 2px solid var(--border);
-    overflow: hidden;
-    cursor: pointer;
-    transition: all 0.2s;
-    background: var(--surface-alt);
-  }
-
-  .thumbnail:hover {
-    border-color: var(--accent);
-  }
-
-  .thumbnail.active {
-    border-color: var(--accent);
-    box-shadow: 0 0 12px rgba(45, 212, 168, 0.3);
-  }
-
-  .thumbnail img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .edit-toast {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    background: var(--accent);
-    color: #000;
-    padding: 8px 18px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 600;
-    opacity: 0;
-    transform: translateY(10px);
-    transition: opacity 0.3s, transform 0.3s;
-    z-index: 100;
+    inset: 0;
     pointer-events: none;
   }
 
-  .edit-toast.show {
-    opacity: 1;
-    transform: translateY(0);
+  /* ── Detected blocks (visible, mode=detected) ── */
+  .detected-block {
+    position: absolute;
+    box-sizing: border-box;
+    border: 1px solid rgba(45,212,168,0.4);
+    border-radius: 3px;
+    background: rgba(45,212,168,0.15);
+    pointer-events: none;
   }
 
-  .upgrade-prompt {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 32px;
-    max-width: 400px;
-    z-index: 1000;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  .detected-img-block {
+    position: absolute;
+    box-sizing: border-box;
+    border: 1px solid rgba(99,165,212,0.45);
+    border-radius: 3px;
+    background: rgba(99,165,212,0.12);
+    pointer-events: none;
   }
 
-  .upgrade-prompt h3 {
-    font-size: 18px;
-    font-weight: 600;
-    margin-bottom: 12px;
-  }
-
-  .upgrade-prompt p {
-    color: var(--text-dim);
-    margin-bottom: 20px;
-    line-height: 1.5;
-  }
-
-  .upgrade-prompt-buttons {
-    display: flex;
-    gap: 12px;
-  }
-
-  .upgrade-prompt-buttons button {
-    flex: 1;
-    padding: 10px 16px;
-    border-radius: 8px;
-    border: none;
-    font-family: inherit;
-    font-size: 14px;
-    font-weight: 600;
+  /* ── Selecting mode blocks (clickable toggle) ── */
+  .select-block {
+    position: absolute;
+    box-sizing: border-box;
+    border-radius: 3px;
     cursor: pointer;
-    transition: all 0.2s;
+    pointer-events: all;
+    transition: all 0.15s;
+  }
+  .select-block.included {
+    border: 1.5px solid var(--accent);
+    background: rgba(45,212,168,0.2);
+  }
+  .select-block.excluded {
+    border: 1.5px dashed rgba(45,212,168,0.25);
+    background: rgba(45,212,168,0.04);
+    opacity: 0.4;
+  }
+  .select-block:hover { opacity: 1; }
+
+  .select-img-block {
+    position: absolute;
+    box-sizing: border-box;
+    border-radius: 3px;
+    cursor: pointer;
+    pointer-events: all;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .select-img-block.included {
+    border: 1.5px solid #63a5d4;
+    background: rgba(99,165,212,0.18);
+  }
+  .select-img-block.excluded {
+    border: 1.5px dashed rgba(99,165,212,0.2);
+    background: rgba(99,165,212,0.04);
+    opacity: 0.35;
+  }
+  .select-img-block:hover { opacity: 1; }
+
+  .select-img-badge {
+    font-size: 9px;
+    font-weight: 600;
+    color: #63a5d4;
+    background: rgba(20,18,17,0.8);
+    padding: 2px 5px;
+    border-radius: 3px;
+    pointer-events: none;
+    letter-spacing: 0.3px;
   }
 
-  .upgrade-cta {
+  /* ── Results banner ── */
+  .results-banner {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 18px;
+    background: rgba(20, 18, 17, 0.92);
+    border: 1px solid rgba(45,212,168,0.4);
+    border-radius: 12px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    z-index: 50;
+    font-size: 13px;
+    font-weight: 600;
+    color: #2DD4A8;
+    white-space: nowrap;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+
+  .results-banner-sep {
+    width: 1px;
+    height: 16px;
+    background: rgba(45,212,168,0.25);
+  }
+
+  .results-banner-img {
+    color: #63a5d4;
+  }
+
+  /* ── Action buttons after detection ── */
+  .slide-actions {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 40;
+  }
+
+  .btn-download-slide {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 11px 22px;
     background: var(--accent);
-    color: var(--surface);
+    color: #111;
+    border: none;
+    border-radius: 8px;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(45,212,168,0.35);
+    transition: all 0.18s;
+    white-space: nowrap;
   }
-
-  .upgrade-cta:hover {
+  .btn-download-slide:hover {
     background: var(--accent-light);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(45,212,168,0.45);
+  }
+  .btn-download-slide:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
   }
 
-  .upgrade-dismiss {
-    background: var(--surface-alt);
-    border: 1px solid var(--border);
+  .btn-select-manual {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 11px 18px;
+    background: transparent;
     color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: inherit;
+    font-weight: 500;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.18s;
+    white-space: nowrap;
   }
-
-  .upgrade-dismiss:hover {
-    border-color: var(--accent);
+  .btn-select-manual:hover {
+    border-color: rgba(45,212,168,0.4);
     color: var(--accent);
   }
 
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 999;
+  .btn-select-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 11px 16px;
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: inherit;
+    font-weight: 500;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.18s;
+    white-space: nowrap;
+  }
+  .btn-select-back:hover {
+    border-color: rgba(255,255,255,0.2);
+    color: var(--text);
   }
 
-  .progress-indicator {
-    position: fixed;
-    top: 16px;
+  .select-counter {
+    font-size: 12px;
+    color: var(--text-dim);
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    white-space: nowrap;
+  }
+
+  /* ── Floating toolbar (pristine mode) ── */
+  .slide-toolbar {
+    position: absolute;
+    bottom: 14px;
     left: 50%;
     transform: translateX(-50%);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: rgba(20, 18, 17, 0.82);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    z-index: 20;
+    white-space: nowrap;
+  }
+
+  .toolbar-divider {
+    width: 1px;
+    height: 20px;
+    background: rgba(255,255,255,0.1);
+    margin: 0 2px;
+  }
+
+  .tb-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 7px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tb-btn:hover:not(:disabled) {
+    background: rgba(255,255,255,0.08);
+    color: var(--text);
+  }
+  .tb-btn:disabled { opacity: 0.45; cursor: default; }
+
+  .tb-btn.active {
+    background: rgba(45,212,168,0.12);
+    border-color: rgba(45,212,168,0.35);
+    color: var(--accent);
+  }
+
+  .tb-btn.loading {
+    pointer-events: none;
+  }
+
+  /* ── Spinner ── */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+
+  /* ── Error toast ── */
+  .ed-error {
+    margin: 0 auto 12px;
+    max-width: 600px;
+    padding: 10px 16px;
+    background: rgba(248,113,113,0.12);
+    border: 1px solid rgba(248,113,113,0.3);
     border-radius: 8px;
     font-size: 13px;
-    color: var(--text-dim);
-    z-index: 500;
+    color: var(--error);
   }
+
+  /* ── Tier badge ── */
+  .tier-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 5px;
+    background: rgba(45,212,168,0.12);
+    color: var(--accent);
+    border: 1px solid rgba(45,212,168,0.25);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Watermark ── */
+  .watermark-notice {
+    font-size: 12px;
+    color: var(--text-dim);
+    background: rgba(45,212,168,0.06);
+    border: 1px solid rgba(45,212,168,0.15);
+    border-radius: 6px;
+    padding: 4px 10px;
+  }
+
+  /* ── Export result ── */
+  .export-done {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 16px;
+    padding: 60px 24px;
+    text-align: center;
+  }
+  .export-done h2 { font-size: 22px; font-weight: 700; }
+  .export-done p { font-size: 14px; color: var(--text-dim); }
 `;
 
-export default function Editor() {
-  const { tier } = useTier();
-  const [allSlides, setAllSlides] = useState([]);
-  const [currentSlideIdx, setCurrentSlideIdx] = useState(0);
-  const [fileName, setFileName] = useState('');
-  const [processing, setProcessing] = useState(false);
-  const [cancelFlag, setCancelFlag] = useState(false);
-  const [progressMsg, setProgressMsg] = useState('');
-  const [upgradePrompt, setUpgradePrompt] = useState(null);
-  const [showToast, setShowToast] = useState(false);
-  const [toastMsg, setToastMsg] = useState('');
-  const [undoStack, setUndoStack] = useState([]);
-  const [redoStack, setRedoStack] = useState([]);
-  const [dragInfo, setDragInfo] = useState(null);
-  const [resizeInfo, setResizeInfo] = useState(null);
+// ─── SVG Icons ────────────────────────────────────────────────────────────────
 
-  const pdfjsLib = useRef(null);
-  const tessWorker = useRef(null);
-  const toastTimer = useRef(null);
-  const viewportRef = useRef(null);
+const IconText = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/>
+  </svg>
+);
 
-  const tierConfig = TIERS[tier] || TIERS.free;
-  const canUseAI = !tierConfig.models.includes('offline') || tierConfig.models.length > 1;
-  const canDragResize = tier === 'pro' || tier === 'enterprise';
-  const maxPages = getMaxPages(tier);
+const IconPhoto = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+  </svg>
+);
 
-  // Load PDF.js via script tag (CDN imports break Webpack)
-  useEffect(() => {
-    if (typeof window !== 'undefined' && !window.pdfjsLib) {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs';
-      script.type = 'module';
-      script.onload = () => {
-        pdfjsLib.current = window.pdfjsLib;
-        if (pdfjsLib.current) {
-          pdfjsLib.current.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
-        }
-      };
-      document.head.appendChild(script);
-    } else if (typeof window !== 'undefined' && window.pdfjsLib) {
-      pdfjsLib.current = window.pdfjsLib;
-    }
-  }, []);
+const IconCheck = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12"/>
+  </svg>
+);
 
-  const showEditToast = useCallback((msg) => {
-    setToastMsg(msg);
-    setShowToast(true);
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setShowToast(false), 1500);
-  }, []);
+const IconDownload = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+  </svg>
+);
 
-  const showUpgradePrompt = useCallback((msg) => {
-    setUpgradePrompt(msg);
-  }, []);
+const IconUpload = () => (
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+  </svg>
+);
 
-  const dismissUpgradePrompt = useCallback(() => {
-    setUpgradePrompt(null);
-  }, []);
+const IconSelectAll = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+  </svg>
+);
 
-  // Pixel color sampling functions (preserved exactly)
-  const sampleBg = useCallback((px, w, h, x1, y1, x2, y2) => {
-    const m = 50;
-    const rs = [], gs = [], bs = [];
-    const pairs = [
-      [x1, Math.max(0, y1 - m), x2, Math.max(0, y1 - 3)],
-      [x1, Math.min(h, y2 + 3), x2, Math.min(h, y2 + m)],
-      [Math.max(0, x1 - m), y1, Math.max(0, x1 - 3), y2],
-      [Math.min(w, x2 + 3), y1, Math.min(w, x2 + m), y2]
-    ];
-    for (const [a, b, c, d] of pairs) {
-      if (c <= a || d <= b) continue;
-      const sx = Math.max(1, Math.floor((c - a) / 12));
-      const sy = Math.max(1, Math.floor((d - b) / 12));
-      for (let y = b; y < d; y += sy) {
-        for (let x = a; x < c; x += sx) {
-          if (x >= 0 && x < w && y >= 0 && y < h) {
-            const i = (y * w + x) * 4;
-            rs.push(px[i]); gs.push(px[i + 1]); bs.push(px[i + 2]);
-          }
+// ─── Pixel utility functions ──────────────────────────────────────────────────
+
+function sampleBg(px, w, h, x1, y1, x2, y2) {
+  const m = 50;
+  const rs = [], gs = [], bs = [];
+  const pairs = [
+    [x1, Math.max(0, y1 - m), x2, Math.max(0, y1 - 3)],
+    [x1, Math.min(h, y2 + 3), x2, Math.min(h, y2 + m)],
+    [Math.max(0, x1 - m), y1, Math.max(0, x1 - 3), y2],
+    [Math.min(w, x2 + 3), y1, Math.min(w, x2 + m), y2]
+  ];
+  for (const [a, b, c, d] of pairs) {
+    if (c <= a || d <= b) continue;
+    const sx = Math.max(1, Math.floor((c - a) / 12));
+    const sy = Math.max(1, Math.floor((d - b) / 12));
+    for (let y = b; y < d; y += sy) {
+      for (let x = a; x < c; x += sx) {
+        if (x >= 0 && x < w && y >= 0 && y < h) {
+          const i = (y * w + x) * 4;
+          rs.push(px[i]); gs.push(px[i + 1]); bs.push(px[i + 2]);
         }
       }
     }
-    if (!rs.length) return [240, 240, 240];
-    rs.sort((a, b) => a - b);
-    gs.sort((a, b) => a - b);
-    bs.sort((a, b) => a - b);
-    const mid = Math.floor(rs.length / 2);
-    return [rs[mid], gs[mid], bs[mid]];
-  }, []);
+  }
+  if (!rs.length) return [240, 240, 240];
+  rs.sort((a, b) => a - b);
+  gs.sort((a, b) => a - b);
+  bs.sort((a, b) => a - b);
+  const mid = Math.floor(rs.length / 2);
+  return [rs[mid], gs[mid], bs[mid]];
+}
 
-  const sampleShapeFill = useCallback((px, w, h, x1, y1, x2, y2) => {
-    const rw = x2 - x1, rh = y2 - y1;
-    const insetX = Math.round(rw * 0.2), insetY = Math.round(rh * 0.2);
-    const ix1 = x1 + insetX, iy1 = y1 + insetY;
-    const ix2 = x2 - insetX, iy2 = y2 - insetY;
-    const pixels = [];
-    const sx = Math.max(1, Math.floor((ix2 - ix1) / 20));
-    const sy = Math.max(1, Math.floor((iy2 - iy1) / 20));
-    for (let y = Math.max(0, iy1); y < Math.min(h, iy2); y += sy) {
-      for (let x = Math.max(0, ix1); x < Math.min(w, ix2); x += sx) {
-        const i = (y * w + x) * 4;
-        pixels.push([px[i], px[i + 1], px[i + 2]]);
-      }
+function getTextColor(px, w, h, x1, y1, x2, y2, bg) {
+  const pixels = [];
+  const sx = Math.max(1, Math.floor((x2 - x1) / 20));
+  const sy = Math.max(1, Math.floor((y2 - y1) / 20));
+  for (let y = Math.max(0, y1); y < Math.min(h, y2); y += sy) {
+    for (let x = Math.max(0, x1); x < Math.min(w, x2); x += sx) {
+      const i = (y * w + x) * 4;
+      pixels.push([px[i], px[i + 1], px[i + 2]]);
     }
-    if (!pixels.length) return [200, 200, 200];
-    const counts = {};
-    for (const [r, g, b] of pixels) {
-      const k = `${(r >> 4) << 4},${(g >> 4) << 4},${(b >> 4) << 4}`;
-      counts[k] = (counts[k] || 0) + 1;
+  }
+  if (!pixels.length) return [0, 0, 0];
+  const dists = pixels.map(([r, g, b]) =>
+    Math.sqrt((r - bg[0]) ** 2 + (g - bg[1]) ** 2 + (b - bg[2]) ** 2)
+  );
+  const sorted = [...dists].sort((a, b) => a - b);
+  const thr = sorted[Math.floor(sorted.length * 0.8)] || 30;
+  let sR = 0, sG = 0, sB = 0, cnt = 0;
+  for (let i = 0; i < pixels.length; i++) {
+    if (dists[i] > thr) {
+      sR += pixels[i][0];
+      sG += pixels[i][1];
+      sB += pixels[i][2];
+      cnt++;
     }
-    let best = null, bestC = 0;
-    for (const k in counts) {
-      if (counts[k] > bestC) {
-        bestC = counts[k];
-        best = k;
-      }
-    }
-    return best ? best.split(',').map(Number) : [200, 200, 200];
-  }, []);
+  }
+  return cnt ? [Math.round(sR / cnt), Math.round(sG / cnt), Math.round(sB / cnt)] : [0, 0, 0];
+}
 
-  const getTextColor = useCallback((px, w, h, x1, y1, x2, y2, bg) => {
-    const pixels = [];
-    const sx = Math.max(1, Math.floor((x2 - x1) / 20));
-    const sy = Math.max(1, Math.floor((y2 - y1) / 20));
-    for (let y = Math.max(0, y1); y < Math.min(h, y2); y += sy) {
-      for (let x = Math.max(0, x1); x < Math.min(w, x2); x += sx) {
-        const i = (y * w + x) * 4;
-        pixels.push([px[i], px[i + 1], px[i + 2]]);
-      }
-    }
-    if (!pixels.length) return [0, 0, 0];
-    const dists = pixels.map(([r, g, b]) =>
-      Math.sqrt((r - bg[0]) ** 2 + (g - bg[1]) ** 2 + (b - bg[2]) ** 2)
-    );
-    const sorted = [...dists].sort((a, b) => a - b);
-    const thr = sorted[Math.floor(sorted.length * 0.8)] || 30;
-    let sR = 0, sG = 0, sB = 0, cnt = 0;
-    for (let i = 0; i < pixels.length; i++) {
-      if (dists[i] > thr) {
-        sR += pixels[i][0];
-        sG += pixels[i][1];
-        sB += pixels[i][2];
-        cnt++;
-      }
-    }
-    return cnt ? [Math.round(sR / cnt), Math.round(sG / cnt), Math.round(sB / cnt)] : [0, 0, 0];
-  }, []);
+function cleanBackground(srcCanvas, imgData, textBlocks, imageRegions) {
+  const w = srcCanvas.width, h = srcCanvas.height;
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext('2d');
+  ctx.drawImage(srcCanvas, 0, 0);
+  const px = imgData.data;
 
-  // Crop image regions from a canvas using normalized 0-1 coordinates.
-  // Returns array of { dataUrl, region } where region is the original normalized rect.
-  const cropImageRegions = useCallback((srcCanvas, imageRegions) => {
-    if (!imageRegions || imageRegions.length === 0) return [];
-    const w = srcCanvas.width, h = srcCanvas.height;
-    const results = [];
-    for (const region of imageRegions) {
-      const x = Math.max(0, Math.round((region.x || 0) * w));
-      const y = Math.max(0, Math.round((region.y || 0) * h));
-      const rw = Math.min(w - x, Math.round((region.w || 0) * w));
-      const rh = Math.min(h - y, Math.round((region.h || 0) * h));
-      if (rw < 4 || rh < 4) continue;
-      const crop = document.createElement('canvas');
-      crop.width = rw;
-      crop.height = rh;
-      const ctx = crop.getContext('2d');
-      ctx.drawImage(srcCanvas, x, y, rw, rh, 0, 0, rw, rh);
-      results.push({
-        dataUrl: crop.toDataURL('image/png'),
-        region: { x: region.x || 0, y: region.y || 0, w: region.w || 0, h: region.h || 0 },
-      });
-    }
-    return results;
-  }, []);
+  // Erase image regions (they will be re-added as PPTX image elements)
+  for (const region of (imageRegions || [])) {
+    const x1 = Math.max(0, Math.round((region.x || 0) * w));
+    const y1 = Math.max(0, Math.round((region.y || 0) * h));
+    const x2 = Math.min(w, Math.round(((region.x || 0) + (region.w || 0)) * w));
+    const y2 = Math.min(h, Math.round(((region.y || 0) + (region.h || 0)) * h));
+    if (x2 <= x1 || y2 <= y1) continue;
+    const bg = sampleBg(px, w, h, x1, y1, x2, y2);
+    ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
+    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+  }
 
-  const cleanBackground = useCallback((srcCanvas, imgData, textBlocks, imageRegions, shapeBlocks) => {
-    const w = srcCanvas.width, h = srcCanvas.height;
-    const out = document.createElement('canvas');
-    out.width = w;
-    out.height = h;
-    const ctx = out.getContext('2d');
-    ctx.drawImage(srcCanvas, 0, 0);
-    const px = imgData.data;
+  // Erase text blocks (they will be re-added as PPTX text boxes)
+  for (const b of textBlocks) {
+    const pxL = Math.max(0, Math.round((b.x || 0) * w));
+    const pxT = Math.max(0, Math.round((b.y || 0) * h));
+    const pxR = Math.min(w, Math.round(((b.x || 0) + (b.w || 0)) * w));
+    const pxB = Math.min(h, Math.round(((b.y || 0) + (b.h || 0)) * h));
+    const padX = Math.max(10, Math.round((pxR - pxL) * 0.04));
+    const padY = Math.max(8, Math.round((pxB - pxT) * 0.08));
+    const x1 = Math.max(0, pxL - padX);
+    const y1 = Math.max(0, pxT - padY);
+    const x2 = Math.min(w, pxR + padX);
+    const y2 = Math.min(h, pxB + padY);
+    const bg = sampleBg(px, w, h, x1, y1, x2, y2);
+    ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
+    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+  }
 
-    for (const s of (shapeBlocks || [])) {
-      const bg = sampleBg(px, w, h, s.pxLeft, s.pxTop, s.pxRight, s.pxBottom);
-      ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
-      ctx.fillRect(s.pxLeft, s.pxTop, s.pxRight - s.pxLeft, s.pxBottom - s.pxTop);
-    }
+  return out;
+}
 
-    // Paint over image regions so they appear as clean background in the PPTX
-    // background layer; they will be re-added as separate image elements.
-    for (const region of (imageRegions || [])) {
-      const x1 = Math.max(0, Math.round((region.x || 0) * w));
-      const y1 = Math.max(0, Math.round((region.y || 0) * h));
-      const x2 = Math.min(w, Math.round(((region.x || 0) + (region.w || 0)) * w));
-      const y2 = Math.min(h, Math.round(((region.y || 0) + (region.h || 0)) * h));
-      if (x2 <= x1 || y2 <= y1) continue;
-      const bg = sampleBg(px, w, h, x1, y1, x2, y2);
-      ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
-      ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-    }
+// ─── PDF.js loader ────────────────────────────────────────────────────────────
 
-    for (const b of textBlocks) {
-      if (b.overImage) continue;
-      const padX = Math.max(10, Math.round((b.pxRight - b.pxLeft) * 0.04));
-      const padY = Math.max(8, Math.round((b.pxBottom - b.pxTop) * 0.08));
-      const x1 = Math.max(0, b.pxLeft - padX);
-      const y1 = Math.max(0, b.pxTop - padY);
-      const x2 = Math.min(w, b.pxRight + padX);
-      const y2 = Math.min(h, b.pxBottom + padY);
-      const bg = sampleBg(px, w, h, x1, y1, x2, y2);
-      ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
-      ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-    }
+let pdfJsPromise = null;
 
-    return out;
-  }, [sampleBg]);
-
-  const callAIVision = useCallback(async (dataUrl, slideNum) => {
-    const maxRetries = 3;
-    let lastError = null;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      if (cancelFlag) throw new Error('Processing cancelled');
-
-      if (attempt > 0) {
-        const delay = Math.min(5000 * Math.pow(2, attempt - 1), 20000);
-        await new Promise(r => setTimeout(r, delay));
-      }
-
-      try {
-        const resp = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: dataUrl, tier })
-        });
-
-        if (resp.status === 429) {
-          lastError = new Error('Modello AI sovraccarico. Riprovo...');
-          continue;
-        }
-        if (resp.status === 503) {
-          lastError = new Error('Servizio AI non disponibile.');
-          continue;
-        }
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({ error: 'Unknown error' }));
-          throw new Error(err.error || `AI Vision failed (${resp.status})`);
-        }
-
-        // Server returns already parsed & validated JSON
-        return await resp.json();
-      } catch (fetchErr) {
-        lastError = fetchErr;
-        if (attempt === maxRetries - 1) throw lastError;
-      }
-    }
-    throw lastError || new Error('AI call failed');
-  }, [cancelFlag, tier]);
-
-  const extractBlocksOffline = useCallback((ocrData, imgW, imgH, minConf) => {
-    const rawLines = [];
-    if (ocrData.blocks && ocrData.blocks.length > 0) {
-      for (let bi = 0; bi < ocrData.blocks.length; bi++) {
-        const block = ocrData.blocks[bi];
-        if (!block.paragraphs) continue;
-        for (const para of block.paragraphs) {
-          if (!para.lines) continue;
-          for (const line of para.lines) {
-            if (!line.words) continue;
-            const words = [];
-            let left = Infinity, top = Infinity, right = 0, bottom = 0;
-            for (const word of line.words) {
-              const text = (word.text || '').trim();
-              if (!text || (word.confidence || 0) < minConf) continue;
-              words.push(text);
-              left = Math.min(left, word.bbox.x0);
-              top = Math.min(top, word.bbox.y0);
-              right = Math.max(right, word.bbox.x1);
-              bottom = Math.max(bottom, word.bbox.y1);
-            }
-            if (words.length > 0) {
-              rawLines.push({ words, blockNum: bi + 1, left, top, right, bottom, height: bottom - top });
-            }
-          }
-        }
-      }
-    }
-
-    rawLines.sort((a, b) => a.blockNum !== b.blockNum ? a.blockNum - b.blockNum : a.top - b.top);
-
-    const MAX_GAP_PCT = 0.02, MAX_BOX_PCT = 0.20, LINE_H_RATIO = 0.4;
-    const textBoxes = [];
-    let cur = null;
-
-    for (const line of rawLines) {
-      const text = line.words.join(' ');
-      if (text.includes('NotebookLM') && text.length < 25) continue;
-      if (text.replace(/\s/g, '').length < 2) continue;
-
-      if (!cur) {
-        cur = { lines: [text], lineHeights: [line.height], blockNum: line.blockNum, left: line.left, top: line.top, right: line.right, bottom: line.bottom };
-        continue;
-      }
-
-      const vGap = line.top - cur.bottom;
-      const avgH = (cur.bottom - cur.top) / cur.lines.length;
-      const sameBlock = line.blockNum === cur.blockNum;
-      const hOverlap = Math.min(line.right, cur.right) - Math.max(line.left, cur.left);
-      const lineW = line.right - line.left;
-      const curW = cur.right - cur.left;
-      const minW = Math.min(lineW, curW);
-      const overlapH = minW > 0 && hOverlap / minW > 0.4;
-      const absGap = vGap > imgH * MAX_GAP_PCT;
-      const boxTall = (line.bottom - cur.top) > imgH * MAX_BOX_PCT;
-      const lastH = cur.lineHeights[cur.lineHeights.length - 1];
-      const hChange = lastH > 0 && line.height > 0 && Math.abs(line.height - lastH) / Math.max(line.height, lastH) > LINE_H_RATIO;
-      const combinedW = Math.max(line.right, cur.right) - Math.min(line.left, cur.left);
-      const tooWide = combinedW > imgW * 0.6;
-      const merge = sameBlock && !absGap && !boxTall && !hChange && overlapH && !tooWide && vGap < avgH * 1.5;
-
-      if (merge) {
-        cur.lines.push(text);
-        cur.lineHeights.push(line.height);
-        cur.left = Math.min(cur.left, line.left);
-        cur.top = Math.min(cur.top, line.top);
-        cur.right = Math.max(cur.right, line.right);
-        cur.bottom = Math.max(cur.bottom, line.bottom);
+function loadPdfJs() {
+  if (pdfJsPromise) return pdfJsPromise;
+  pdfJsPromise = new Promise((resolve, reject) => {
+    if (window.pdfjsLib) { resolve(window.pdfjsLib); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs';
+    script.type = 'module';
+    script.onload = () => {
+      const lib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
+      if (lib) {
+        lib.GlobalWorkerOptions.workerSrc =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
+        resolve(lib);
       } else {
-        textBoxes.push(cur);
-        cur = { lines: [text], lineHeights: [line.height], blockNum: line.blockNum, left: line.left, top: line.top, right: line.right, bottom: line.bottom };
+        reject(new Error('PDF.js failed to load'));
       }
-    }
-    if (cur) textBoxes.push(cur);
+    };
+    script.onerror = () => reject(new Error('Could not load PDF.js'));
+    document.head.appendChild(script);
+  });
+  return pdfJsPromise;
+}
 
-    return textBoxes.map(b => ({
-      text: b.lines.join('\n'),
-      x: b.left / imgW, y: b.top / imgH,
-      w: (b.right - b.left) / imgW, h: (b.bottom - b.top) / imgH,
-      numLines: b.lines.length,
-      pxLeft: b.left, pxTop: b.top, pxRight: b.right, pxBottom: b.bottom,
-    }));
+// ─── PptxGenJS loader ────────────────────────────────────────────────────────
+
+let pptxPromise = null;
+
+function loadPptxGen() {
+  if (pptxPromise) return pptxPromise;
+  pptxPromise = new Promise((resolve, reject) => {
+    if (window.PptxGenJS) { resolve(window.PptxGenJS); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/gh/gitbrent/PptxGenJS@3.12.0/dist/pptxgen.bundle.js';
+    script.onload = () => {
+      if (window.PptxGenJS) resolve(window.PptxGenJS);
+      else reject(new Error('PptxGenJS not found after load'));
+    };
+    script.onerror = () => reject(new Error('Could not load PptxGenJS'));
+    document.head.appendChild(script);
+  });
+  return pptxPromise;
+}
+
+// ─── Helper: dataUrl from canvas ─────────────────────────────────────────────
+
+function canvasFromDataUrl(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      c.getContext('2d').drawImage(img, 0, 0);
+      resolve(c);
+    };
+    img.src = dataUrl;
+  });
+}
+
+// ─── createSlideState helper ─────────────────────────────────────────────────
+
+function createSlideState(origDataUrl, width, height) {
+  return {
+    origDataUrl,
+    origCanvas: null,
+    width,
+    height,
+    mode: 'pristine', // 'pristine' | 'detected' | 'selecting'
+    detection: {
+      status: 'idle', // 'idle' | 'loading' | 'done' | 'error'
+      error: null,
+      textBlocks: [],
+      imageRegions: [],
+    },
+    grabbedTextIndices: new Set(),
+    grabbedImageIndices: new Set(),
+  };
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export default function Editor({ onReset }) {
+  const { tier: rawTier } = useTier();
+  const tier = resolveTier(rawTier || 'free');
+  const maxPages = getMaxPages(tier);
+  const tierConfig = TIERS[tier] || TIERS.free;
+  const needsWatermark = tierConfig.watermark !== false;
+
+  const [phase, setPhase] = useState('upload'); // 'upload' | 'rendering' | 'slides' | 'exporting' | 'done'
+  const [renderProgress, setRenderProgress] = useState({ done: 0, total: 0, label: '' });
+  const [slides, setSlides] = useState([]); // array of createSlideState()
+  const [fileName, setFileName] = useState('');
+  const [exportError, setExportError] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const fileInputRef = useRef(null);
+
+  // ── Inject CSS once ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const id = 'ed-styles';
+    if (!document.getElementById(id)) {
+      const el = document.createElement('style');
+      el.id = id;
+      el.textContent = STYLES;
+      document.head.appendChild(el);
+    }
   }, []);
 
-  const handleFileUpload = useCallback(async (file) => {
-    if (!pdfjsLib.current) {
-      alert('PDF.js not loaded yet. Please try again.');
-      return;
-    }
+  // ── PDF rendering ─────────────────────────────────────────────────────────
 
+  const renderPdf = useCallback(async (file) => {
+    setPhase('rendering');
     setFileName(file.name.replace(/\.pdf$/i, ''));
-    setProcessing(true);
-    setCancelFlag(false);
+    setRenderProgress({ done: 0, total: 0, label: 'Caricamento PDF...' });
 
     try {
-      const pdf = await pdfjsLib.current.getDocument({ data: await file.arrayBuffer() }).promise;
-      const n = pdf.numPages;
+      const pdfjsLib = await loadPdfJs();
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const numPages = Math.min(pdf.numPages, maxPages);
 
-      if (tier === 'free' && n > maxPages) {
-        setProcessing(false);
-        showUpgradePrompt(`Il piano Free supporta fino a ${maxPages} pagine. Passa a Pro per elaborare tutte le ${n} pagine.`);
-        return;
-      }
+      setRenderProgress({ done: 0, total: numPages, label: `Rendering ${numPages} pagine...` });
 
-      // Load Tesseract for OCR
-      if (typeof window.Tesseract === 'undefined') {
-        const tessScript = document.createElement('script');
-        tessScript.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-        document.head.appendChild(tessScript);
-        await new Promise(r => tessScript.onload = r);
-      }
-      tessWorker.current = await window.Tesseract.createWorker('ita+eng', 1);
-
-      const slides = [];
-      for (let i = 1; i <= n; i++) {
-        if (cancelFlag) throw new Error('Processing cancelled');
-
+      const results = [];
+      for (let i = 1; i <= numPages; i++) {
         const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 2 });
+        const viewport = page.getViewport({ scale: 2.0 });
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         const ctx = canvas.getContext('2d');
         await page.render({ canvasContext: ctx, viewport }).promise;
-
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const blocks = [];
-
-        // Extract text with AI or OCR
-        let aiImageRegions = [];
-        if (canUseAI) {
-          setProgressMsg(`Slide ${i}/${n} — AI Vision in corso...`);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-          let parsed;
-          try {
-            parsed = await callAIVision(dataUrl, i);
-          } catch (aiErr) {
-            console.warn(`⚠️ AI Vision failed for slide ${i}, falling back to OCR:`, aiErr.message);
-            setProgressMsg(`Slide ${i}/${n} — AI non disponibile, uso OCR...`);
-            parsed = null;
-          }
-
-          if (parsed && parsed.textBlocks && parsed.textBlocks.length > 0) {
-            // AI Vision succeeded — use AI results
-            aiImageRegions = parsed.imageRegions || [];
-
-            const textBlocks = (parsed.textBlocks || []).map(tb => {
-              const pxLeft = Math.round((tb.x || 0) * canvas.width);
-              const pxTop = Math.round((tb.y || 0) * canvas.height);
-              const pxRight = Math.round(((tb.x || 0) + (tb.w || 0.1)) * canvas.width);
-              const pxBottom = Math.round(((tb.y || 0) + (tb.h || 0.05)) * canvas.height);
-              const bg = sampleBg(imgData.data, canvas.width, canvas.height, pxLeft, pxTop, pxRight, pxBottom);
-              const tc = getTextColor(imgData.data, canvas.width, canvas.height, pxLeft, pxTop, pxRight, pxBottom, bg);
-              const colorHex = tc.map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
-              blocks.push({
-                text: tb.text || '', x: tb.x || 0, y: tb.y || 0, w: tb.w || 0.1, h: tb.h || 0.05,
-                numLines: (tb.text || '').split('\n').length,
-                pxLeft, pxTop, pxRight, pxBottom, aiFontSize: tb.fontSize || null, aiBold: tb.bold || false,
-                overImage: false, pixelColor: colorHex, bgColor: `rgb(${bg[0]},${bg[1]},${bg[2]})`
-              });
-            });
-          } else {
-            // AI failed or returned empty — fallback to OCR for this slide
-            setProgressMsg(`Slide ${i}/${n} — OCR fallback...`);
-            const ocrResult = await tessWorker.current.recognize(canvas);
-            const tessBlocks = extractBlocksOffline(ocrResult.data, canvas.width, canvas.height, 0.3);
-            for (const tb of tessBlocks) {
-              const bg = sampleBg(imgData.data, canvas.width, canvas.height, tb.pxLeft, tb.pxTop, tb.pxRight, tb.pxBottom);
-              const tc = getTextColor(imgData.data, canvas.width, canvas.height, tb.pxLeft, tb.pxTop, tb.pxRight, tb.pxBottom, bg);
-              const colorHex = tc.map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
-              blocks.push({
-                text: tb.text, x: tb.x, y: tb.y, w: tb.w, h: tb.h, numLines: tb.numLines,
-                pxLeft: tb.pxLeft, pxTop: tb.pxTop, pxRight: tb.pxRight, pxBottom: tb.pxBottom,
-                aiFontSize: null, aiBold: false, overImage: false, pixelColor: colorHex, bgColor: `rgb(${bg[0]},${bg[1]},${bg[2]})`
-              });
-            }
-          }
-        } else {
-          // Free tier — OCR only
-          setProgressMsg(`Slide ${i}/${n} — OCR in corso...`);
-          const ocrResult = await tessWorker.current.recognize(canvas);
-          const tessBlocks = extractBlocksOffline(ocrResult.data, canvas.width, canvas.height, 0.3);
-          for (const tb of tessBlocks) {
-            const bg = sampleBg(imgData.data, canvas.width, canvas.height, tb.pxLeft, tb.pxTop, tb.pxRight, tb.pxBottom);
-            const tc = getTextColor(imgData.data, canvas.width, canvas.height, tb.pxLeft, tb.pxTop, tb.pxRight, tb.pxBottom, bg);
-            const colorHex = tc.map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
-            blocks.push({
-              text: tb.text, x: tb.x, y: tb.y, w: tb.w, h: tb.h, numLines: tb.numLines,
-              pxLeft: tb.pxLeft, pxTop: tb.pxTop, pxRight: tb.pxRight, pxBottom: tb.pxBottom,
-              aiFontSize: null, aiBold: false, overImage: false, pixelColor: colorHex, bgColor: `rgb(${bg[0]},${bg[1]},${bg[2]})`
-            });
-          }
-        }
-
-        // Crop image regions from the high-res canvas before cleaning the background
-        const extractedImages = cropImageRegions(canvas, aiImageRegions);
-
-        const cleaned = cleanBackground(canvas, imgData, blocks, aiImageRegions, []);
-        slides.push({
-          origDataUrl: canvas.toDataURL('image/jpeg', 0.92),
-          cleanedDataUrl: cleaned.toDataURL('image/jpeg', 0.92),
-          origImgData: imgData,
-          blocks,
-          extracted: extractedImages,
-          imgRegions: aiImageRegions,
-          shapes: [],
-          width: canvas.width,
-          height: canvas.height,
-        });
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        results.push(createSlideState(dataUrl, viewport.width, viewport.height));
+        setRenderProgress({ done: i, total: numPages, label: `Pagina ${i} / ${numPages}` });
       }
 
-      if (tessWorker.current) await tessWorker.current.terminate();
-
-      setAllSlides(slides);
-      setCurrentSlideIdx(0);
-      setProcessing(false);
+      setSlides(results);
+      setPhase('slides');
     } catch (err) {
-      console.error(err);
-      setProcessing(false);
-      alert(`Error: ${err.message}`);
+      console.error('PDF render error:', err);
+      setExportError(`Errore nel rendering del PDF: ${err.message}`);
+      setPhase('upload');
     }
-  }, [tier, maxPages, canUseAI, callAIVision, sampleBg, getTextColor, cleanBackground, cropImageRegions, extractBlocksOffline, cancelFlag, showUpgradePrompt]);
+  }, [maxPages]);
 
-  const handleTextEdit = useCallback((slideIdx, blockIdx, newText) => {
-    const newSlides = [...allSlides];
-    newSlides[slideIdx].blocks[blockIdx].text = newText;
-    setAllSlides(newSlides);
-    showEditToast('Testo salvato');
+  // ── File input handling ───────────────────────────────────────────────────
 
-    setUndoStack([...undoStack, { slideIdx, blockIdx, oldText: allSlides[slideIdx].blocks[blockIdx].text }]);
-    setRedoStack([]);
-  }, [allSlides, undoStack, showEditToast]);
+  const handleFileSelect = useCallback((file) => {
+    if (!file || file.type !== 'application/pdf') return;
+    renderPdf(file);
+  }, [renderPdf]);
 
-  const handleUndo = useCallback(() => {
-    if (undoStack.length === 0) return;
-    const lastAction = undoStack[undoStack.length - 1];
-    const newSlides = [...allSlides];
-    const oldText = newSlides[lastAction.slideIdx].blocks[lastAction.blockIdx].text;
-    newSlides[lastAction.slideIdx].blocks[lastAction.blockIdx].text = lastAction.oldText;
-    setAllSlides(newSlides);
-    setRedoStack([...redoStack, { slideIdx: lastAction.slideIdx, blockIdx: lastAction.blockIdx, text: oldText }]);
-    setUndoStack(undoStack.slice(0, -1));
-  }, [allSlides, undoStack, redoStack]);
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files[0];
+    handleFileSelect(file);
+  }, [handleFileSelect]);
 
-  const handleRedo = useCallback(() => {
-    if (redoStack.length === 0) return;
-    const lastAction = redoStack[redoStack.length - 1];
-    const newSlides = [...allSlides];
-    const oldText = newSlides[lastAction.slideIdx].blocks[lastAction.blockIdx].text;
-    newSlides[lastAction.slideIdx].blocks[lastAction.blockIdx].text = lastAction.text;
-    setAllSlides(newSlides);
-    setUndoStack([...undoStack, { slideIdx: lastAction.slideIdx, blockIdx: lastAction.blockIdx, oldText }]);
-    setRedoStack(redoStack.slice(0, -1));
-  }, [allSlides, undoStack, redoStack]);
+  // ── Per-slide AI detection ────────────────────────────────────────────────
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === 'z' && !e.shiftKey) {
-          e.preventDefault();
-          handleUndo();
-        } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
-          e.preventDefault();
-          handleRedo();
-        }
+  const runDetection = useCallback(async (slideIndex) => {
+    setSlides(prev => {
+      const next = [...prev];
+      next[slideIndex] = {
+        ...next[slideIndex],
+        detection: { ...next[slideIndex].detection, status: 'loading', error: null }
+      };
+      return next;
+    });
+
+    try {
+      const slide = slides[slideIndex];
+      const resp = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: slide.origDataUrl, tier })
+      });
+
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || `Errore AI (${resp.status})`);
       }
-      if (allSlides.length > 0 && !['input', 'textarea'].includes(document.activeElement?.tagName?.toLowerCase())) {
-        if (e.key === 'ArrowLeft' && currentSlideIdx > 0) {
-          setCurrentSlideIdx(currentSlideIdx - 1);
-        } else if (e.key === 'ArrowRight' && currentSlideIdx < allSlides.length - 1) {
-          setCurrentSlideIdx(currentSlideIdx + 1);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentSlideIdx, allSlides, handleUndo, handleRedo]);
 
-  const handleTextBlockPointerDown = useCallback((e, blockIdx) => {
-    if (!canDragResize || e.button !== 0) return;
-    if (e.target.classList.contains('text-block-resize-handle')) {
-      setResizeInfo({ blockIdx, startX: e.clientX, startY: e.clientY, startW: e.currentTarget.offsetWidth, startH: e.currentTarget.offsetHeight });
-      e.preventDefault();
-    } else if (!e.currentTarget.textContent) {
-      setDragInfo({ blockIdx, startX: e.clientX, startY: e.clientY, startLeft: e.currentTarget.offsetLeft, startTop: e.currentTarget.offsetTop });
-      e.preventDefault();
+      const data = await resp.json();
+      const textBlocks = Array.isArray(data.textBlocks) ? data.textBlocks : [];
+      const imageRegions = Array.isArray(data.imageRegions) ? data.imageRegions : [];
+
+      setSlides(prev => {
+        const next = [...prev];
+        next[slideIndex] = {
+          ...next[slideIndex],
+          mode: 'detected',
+          detection: { status: 'done', error: null, textBlocks, imageRegions },
+          grabbedTextIndices: new Set(textBlocks.map((_, i) => i)),
+          grabbedImageIndices: new Set(imageRegions.map((_, i) => i)),
+        };
+        return next;
+      });
+    } catch (err) {
+      setSlides(prev => {
+        const next = [...prev];
+        next[slideIndex] = {
+          ...next[slideIndex],
+          detection: { ...next[slideIndex].detection, status: 'error', error: err.message }
+        };
+        return next;
+      });
     }
-  }, [canDragResize]);
+  }, [slides, tier]);
 
-  useEffect(() => {
-    if (!dragInfo && !resizeInfo) return;
+  // ── Toggle individual block selection ────────────────────────────────────
 
-    const handlePointerMove = (e) => {
-      if (!viewportRef.current) return;
-      const viewport = viewportRef.current;
-      const vpRect = viewport.getBoundingClientRect();
+  const toggleTextBlock = useCallback((slideIndex, blockIndex) => {
+    setSlides(prev => {
+      const next = [...prev];
+      const slide = { ...next[slideIndex] };
+      const grabbed = new Set(slide.grabbedTextIndices);
+      if (grabbed.has(blockIndex)) grabbed.delete(blockIndex);
+      else grabbed.add(blockIndex);
+      slide.grabbedTextIndices = grabbed;
+      next[slideIndex] = slide;
+      return next;
+    });
+  }, []);
 
-      if (dragInfo) {
-        const dx = e.clientX - dragInfo.startX;
-        const dy = e.clientY - dragInfo.startY;
-        const newLeft = Math.max(0, Math.min(vpRect.width - 50, dragInfo.startLeft + dx));
-        const newTop = Math.max(0, Math.min(vpRect.height - 20, dragInfo.startTop + dy));
+  const toggleImageBlock = useCallback((slideIndex, blockIndex) => {
+    setSlides(prev => {
+      const next = [...prev];
+      const slide = { ...next[slideIndex] };
+      const grabbed = new Set(slide.grabbedImageIndices);
+      if (grabbed.has(blockIndex)) grabbed.delete(blockIndex);
+      else grabbed.add(blockIndex);
+      slide.grabbedImageIndices = grabbed;
+      next[slideIndex] = slide;
+      return next;
+    });
+  }, []);
 
-        const textBlock = viewport.querySelector(`[data-block-idx="${dragInfo.blockIdx}"]`);
-        if (textBlock) {
-          textBlock.style.left = newLeft + 'px';
-          textBlock.style.top = newTop + 'px';
-        }
-      } else if (resizeInfo) {
-        const dx = e.clientX - resizeInfo.startX;
-        const dy = e.clientY - resizeInfo.startY;
-        const newW = Math.max(50, resizeInfo.startW + dx);
-        const newH = Math.max(20, resizeInfo.startH + dy);
+  // ── Select all for a slide ────────────────────────────────────────────────
 
-        const textBlock = viewport.querySelector(`[data-block-idx="${resizeInfo.blockIdx}"]`);
-        if (textBlock) {
-          textBlock.style.width = newW + 'px';
-          textBlock.style.height = newH + 'px';
-        }
+  const selectAll = useCallback((slideIndex) => {
+    setSlides(prev => {
+      const next = [...prev];
+      const slide = { ...next[slideIndex] };
+      const det = slide.detection;
+      slide.grabbedTextIndices = new Set(det.textBlocks.map((_, i) => i));
+      slide.grabbedImageIndices = new Set(det.imageRegions.map((_, i) => i));
+      next[slideIndex] = slide;
+      return next;
+    });
+  }, []);
+
+  // ── Set slide mode ────────────────────────────────────────────────────────
+
+  const setSlideMode = useCallback((slideIndex, mode) => {
+    setSlides(prev => {
+      const next = [...prev];
+      next[slideIndex] = { ...next[slideIndex], mode };
+      return next;
+    });
+  }, []);
+
+  // ── Build PPTX from a subset of slides ───────────────────────────────────
+
+  const buildAndDownloadPptx = useCallback(async (slideSubset, name) => {
+    const PptxGenJS = await loadPptxGen();
+    const pptx = new PptxGenJS();
+    pptx.layout = 'LAYOUT_WIDE';
+
+    const SLIDE_W = 13.33;
+    const SLIDE_H = 7.5;
+
+    for (const slide of slideSubset) {
+      const pSlide = pptx.addSlide();
+
+      const det = slide.detection;
+      const hasGrabbedText = slide.grabbedTextIndices.size > 0;
+      const hasGrabbedImages = slide.grabbedImageIndices.size > 0;
+      const hasAnyGrabbed = hasGrabbedText || hasGrabbedImages;
+
+      let origCanvas = slide.origCanvas;
+      if (!origCanvas) {
+        origCanvas = await canvasFromDataUrl(slide.origDataUrl);
       }
-    };
 
-    const handlePointerUp = () => {
-      const vpEl = viewportRef.current;
-      if (vpEl) {
-        const idx = dragInfo?.blockIdx ?? resizeInfo?.blockIdx;
-        if (idx != null) {
-          const el = vpEl.querySelector(`[data-block-idx="${idx}"]`);
-          if (el) {
-            const vpW = vpEl.offsetWidth;
-            const vpH = vpEl.offsetHeight;
-            const newX = el.offsetLeft / vpW;
-            const newY = el.offsetTop / vpH;
-            const newW = el.offsetWidth / vpW;
-            const newH = el.offsetHeight / vpH;
-            setAllSlides(prev => {
-              const next = [...prev];
-              const slide = { ...next[currentSlideIdx] };
-              const blocks = [...slide.blocks];
-              blocks[idx] = { ...blocks[idx], x: newX, y: newY, w: newW, h: newH };
-              slide.blocks = blocks;
-              next[currentSlideIdx] = slide;
-              return next;
-            });
-          }
-        }
+      let bgDataUrl;
+
+      if (hasAnyGrabbed) {
+        const tmpCtx = origCanvas.getContext('2d');
+        const imgData = tmpCtx.getImageData(0, 0, origCanvas.width, origCanvas.height);
+        const grabbedText = [...slide.grabbedTextIndices].map(i => det.textBlocks[i]).filter(Boolean);
+        const grabbedImages = [...slide.grabbedImageIndices].map(i => det.imageRegions[i]).filter(Boolean);
+        const cleaned = cleanBackground(origCanvas, imgData, grabbedText, grabbedImages);
+        bgDataUrl = cleaned.toDataURL('image/jpeg', 0.92);
+      } else {
+        bgDataUrl = slide.origDataUrl;
       }
-      setDragInfo(null);
-      setResizeInfo(null);
-    };
 
-    document.addEventListener('pointermove', handlePointerMove);
-    document.addEventListener('pointerup', handlePointerUp);
-    return () => {
-      document.removeEventListener('pointermove', handlePointerMove);
-      document.removeEventListener('pointerup', handlePointerUp);
-    };
-  }, [dragInfo, resizeInfo, currentSlideIdx]);
+      pSlide.addImage({ data: bgDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
 
-  const handleExport = useCallback(async () => {
-    if (typeof window.PptxGenJS === 'undefined') {
-      const pptxScript = document.createElement('script');
-      pptxScript.src = 'https://cdn.jsdelivr.net/gh/gitbrent/PptxGenJS@3.12.0/dist/pptxgen.bundle.js';
-      document.head.appendChild(pptxScript);
-      await new Promise(r => pptxScript.onload = r);
-    }
-
-    const pptx = new window.PptxGenJS();
-    pptx.defineLayout({ name: 'W', width: 13.333, height: 7.5 });
-    pptx.layout = 'W';
-    const SW = 13.333, SH = 7.5;
-
-    for (const s of allSlides) {
-      const sl = pptx.addSlide();
-      sl.addImage({ data: s.cleanedDataUrl, x: 0, y: 0, w: SW, h: SH });
-
-      // Add extracted image regions as separate positioned elements
-      for (const ei of (s.extracted || [])) {
-        const { x, y, w, h } = ei.region;
-        sl.addImage({
-          data: ei.dataUrl,
-          x: x * SW,
-          y: y * SH,
-          w: w * SW,
-          h: h * SH,
+      if (needsWatermark) {
+        pSlide.addText('SlideForge', {
+          x: 0.2, y: SLIDE_H - 0.4, w: 3, h: 0.3,
+          fontSize: 9, color: 'AAAAAA', transparency: 50, fontFace: 'Arial'
         });
       }
 
-      for (const b of s.blocks) {
-        const blockH = b.h * SH;
-        const nLines = Math.max(b.numLines || 1, 1);
-        const lineH = blockH / nLines;
-        const fontSize = Math.max(8, Math.min(48, Math.round(lineH * 72 / 1.35)));
-        const bg = sampleBg(s.origImgData.data, s.width, s.height, b.pxLeft, b.pxTop, b.pxRight, b.pxBottom);
-        const tc = getTextColor(s.origImgData.data, s.width, s.height, b.pxLeft, b.pxTop, b.pxRight, b.pxBottom, bg);
-        const colorHex = tc.map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
-        const bgHex = bg.map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
+      if (!hasAnyGrabbed) continue;
 
-        const pad = 0.06;
-        const x = Math.max(0, b.x * SW - pad);
-        const y = Math.max(0, b.y * SH - pad);
-        const w = Math.min(SW - x, b.w * SW + 2 * pad);
-        const h = Math.min(SH - y, b.h * SH + 2 * pad);
+      const cw = origCanvas.width;
+      const ch = origCanvas.height;
+      const imgDataForColors = origCanvas.getContext('2d').getImageData(0, 0, cw, ch);
 
-        const lines = b.text.split('\n');
-        const txtParts = lines.map((line, i) => ({
-          text: line + (i < lines.length - 1 ? '\n' : ''),
-          options: { fontSize, color: colorHex, bold: fontSize >= 26 && nLines <= 3, fontFace: 'Calibri' }
-        }));
+      for (const idx of slide.grabbedTextIndices) {
+        const tb = det.textBlocks[idx];
+        if (!tb) continue;
 
-        const fillOpt = b.overImage ? { type: 'none' } : { color: bgHex };
-        sl.addText(txtParts, { x, y, w, h, valign: 'top', wrap: true, fill: fillOpt });
+        const pxL = Math.max(0, Math.round((tb.x || 0) * cw));
+        const pxT = Math.max(0, Math.round((tb.y || 0) * ch));
+        const pxR = Math.min(cw, Math.round(((tb.x || 0) + (tb.w || 0)) * cw));
+        const pxB = Math.min(ch, Math.round(((tb.y || 0) + (tb.h || 0)) * ch));
+
+        const bg = sampleBg(imgDataForColors.data, cw, ch, pxL, pxT, pxR, pxB);
+        const tc = getTextColor(imgDataForColors.data, cw, ch, pxL, pxT, pxR, pxB, bg);
+        const toHex = ([r, g, b]) =>
+          [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+
+        const fontSize = tb.fontSize || 18;
+        pSlide.addText(tb.text || '', {
+          x: (tb.x || 0) * SLIDE_W,
+          y: (tb.y || 0) * SLIDE_H,
+          w: (tb.w || 0.1) * SLIDE_W,
+          h: (tb.h || 0.05) * SLIDE_H,
+          fontSize: Math.max(8, Math.min(72, fontSize)),
+          color: toHex(tc),
+          bold: tb.bold === true,
+          align: tb.align || 'left',
+          fontFace: 'Arial',
+          wrap: true,
+          valign: 'top',
+        });
       }
 
-      // Add watermark for free tier
-      if (tier === 'free') {
-        sl.addText('Creato con SlideForge — slideforge.app', {
-          x: 11, y: 6.8, w: 2.3, h: 0.7,
-          fontSize: 8, color: 'CCCCCC', opacity: 0.5, align: 'right', valign: 'bottom'
+      for (const idx of slide.grabbedImageIndices) {
+        const region = det.imageRegions[idx];
+        if (!region) continue;
+
+        const rx = Math.max(0, Math.round((region.x || 0) * cw));
+        const ry = Math.max(0, Math.round((region.y || 0) * ch));
+        const rw = Math.min(cw - rx, Math.round((region.w || 0) * cw));
+        const rh = Math.min(ch - ry, Math.round((region.h || 0) * ch));
+
+        if (rw < 4 || rh < 4) continue;
+
+        const crop = document.createElement('canvas');
+        crop.width = rw;
+        crop.height = rh;
+        crop.getContext('2d').drawImage(origCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
+        const cropDataUrl = crop.toDataURL('image/png');
+
+        pSlide.addImage({
+          data: cropDataUrl,
+          x: (region.x || 0) * SLIDE_W,
+          y: (region.y || 0) * SLIDE_H,
+          w: (region.w || 0.1) * SLIDE_W,
+          h: (region.h || 0.1) * SLIDE_H,
         });
       }
     }
 
-    const blob = await pptx.write({ outputType: 'blob' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${fileName}_EDITABILE.pptx`;
-    a.click();
-  }, [allSlides, fileName, tier, sampleBg, getTextColor]);
+    const safeName = name.replace(/[^a-z0-9_-]/gi, '_') || 'slideforge';
+    await pptx.writeFile({ fileName: `${safeName}.pptx` });
+  }, [needsWatermark]);
 
-  if (processing) {
-    return (
-      <div className="editor-container">
-        <style>{STYLES}</style>
-        <div className="editor-header">
-          <div className="editor-title">SlideForge — Elaborazione</div>
-          <button className="btn btn-cancel" onClick={() => setCancelFlag(true)}>Annulla</button>
-        </div>
-        <div className="editor-main" style={{ justifyContent: 'center', alignItems: 'center' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '48px', marginBottom: '16px', animation: 'spin 1s linear infinite' }}>⟳</div>
-            <h3>{progressMsg || 'Sto elaborando le slide...'}</h3>
-            <p style={{ color: 'var(--text-dim)' }}>Dipende dal numero di pagine e dal modello AI</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // ── Export single slide ───────────────────────────────────────────────────
 
-  if (allSlides.length === 0) {
-    return (
-      <div className="editor-container">
-        <style>{STYLES}</style>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px' }}>
-          <h2 style={{ marginBottom: '16px' }}>Carica un PDF per iniziare</h2>
-          <input
-            type="file"
-            accept=".pdf"
-            onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
-            style={{ padding: '10px', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)' }}
-          />
-          {tier === 'free' && <p style={{ marginTop: '12px', fontSize: '13px', color: 'var(--text-dim)' }}>Piano Free: max {maxPages} pagine</p>}
-        </div>
-      </div>
-    );
-  }
+  const exportSlide = useCallback(async (slideIndex) => {
+    const slide = slides[slideIndex];
+    if (!slide) return;
 
-  const slide = allSlides[currentSlideIdx];
-  const vpH = viewportRef.current?.offsetHeight || 540;
+    setSlides(prev => {
+      const next = [...prev];
+      next[slideIndex] = { ...next[slideIndex], exporting: true };
+      return next;
+    });
+
+    try {
+      await buildAndDownloadPptx([slide], `${fileName}_slide${slideIndex + 1}`);
+    } catch (err) {
+      console.error('Export single slide error:', err);
+      setExportError(`Errore export slide ${slideIndex + 1}: ${err.message}`);
+    } finally {
+      setSlides(prev => {
+        const next = [...prev];
+        next[slideIndex] = { ...next[slideIndex], exporting: false };
+        return next;
+      });
+    }
+  }, [slides, fileName, buildAndDownloadPptx]);
+
+  // ── Export all slides PPTX ────────────────────────────────────────────────
+
+  const exportPptx = useCallback(async () => {
+    setPhase('exporting');
+    setExportError(null);
+    try {
+      await buildAndDownloadPptx(slides, fileName);
+      setPhase('done');
+    } catch (err) {
+      console.error('Export error:', err);
+      setExportError(`Errore export: ${err.message}`);
+      setPhase('slides');
+    }
+  }, [slides, fileName, buildAndDownloadPptx]);
+
+  // ── Compute export readiness ──────────────────────────────────────────────
+
+  const hasAnyGrabbed = slides.some(
+    s => s.grabbedTextIndices.size > 0 || s.grabbedImageIndices.size > 0
+  );
+  const canExport = slides.length > 0 && phase === 'slides';
+
+  // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="editor-container">
-      <style>{STYLES}</style>
-
-      {upgradePrompt && (
-        <>
-          <div className="modal-overlay" onClick={dismissUpgradePrompt} />
-          <div className="upgrade-prompt">
-            <h3>Funzione disponibile nel piano Pro</h3>
-            <p>{upgradePrompt}</p>
-            <div className="upgrade-prompt-buttons">
-              <button className="upgrade-cta" onClick={() => { /* Handle upgrade */ dismissUpgradePrompt(); }}>
-                Passa a Pro
+    <div className="ed-root">
+      {/* Header */}
+      <header className="ed-header">
+        <span className="ed-logo">SlideForge</span>
+        {phase === 'slides' && (
+          <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>
+            {fileName} — {slides.length} slide{slides.length !== 1 ? 's' : ''}
+          </span>
+        )}
+        <div className="ed-header-right">
+          <span className="tier-badge">{tierConfig.name}</span>
+          {phase === 'slides' && (
+            <>
+              {needsWatermark && (
+                <span className="watermark-notice">Export con watermark</span>
+              )}
+              <button className="btn btn-ghost btn-sm" onClick={onReset}>
+                Nuovo PDF
               </button>
-              <button className="upgrade-dismiss" onClick={dismissUpgradePrompt}>Annulla</button>
-            </div>
-          </div>
-        </>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={exportPptx}
+                disabled={!canExport}
+              >
+                <IconDownload /> Esporta PPTX
+              </button>
+            </>
+          )}
+        </div>
+      </header>
+
+      {/* Body */}
+      {phase === 'upload' && (
+        <UploadZone
+          isDragOver={isDragOver}
+          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          maxPages={maxPages}
+          error={exportError}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            style={{ display: 'none' }}
+            onChange={(e) => handleFileSelect(e.target.files[0])}
+          />
+        </UploadZone>
       )}
 
-      <div className="edit-toast" style={{ opacity: showToast ? 1 : 0, transform: showToast ? 'translateY(0)' : 'translateY(10px)' }}>
-        {toastMsg}
-      </div>
-
-      <div className="editor-header">
-        <div className="editor-title">SlideForge Editor — {fileName}</div>
-        <div className="editor-buttons">
-          <button className="btn btn-export" onClick={handleExport}>⬇ Esporta PPTX</button>
-          <button className="btn btn-restart" onClick={() => { setAllSlides([]); setCurrentSlideIdx(0); }}>⟲ Ricomincia</button>
+      {phase === 'rendering' && (
+        <div className="ed-progress">
+          <div className="progress-label">{renderProgress.label}</div>
+          <div className="progress-bar-track">
+            <div
+              className="progress-bar-fill"
+              style={{
+                width: renderProgress.total > 0
+                  ? `${(renderProgress.done / renderProgress.total) * 100}%`
+                  : '10%'
+              }}
+            />
+          </div>
+          {renderProgress.total > 0 && (
+            <div className="progress-label" style={{ fontSize: 12 }}>
+              {renderProgress.done} / {renderProgress.total}
+            </div>
+          )}
         </div>
+      )}
+
+      {phase === 'slides' && (
+        <div className="ed-slides">
+          {exportError && (
+            <div className="ed-error">{exportError}</div>
+          )}
+          {slides.map((slide, si) => (
+            <SlideCard
+              key={si}
+              slide={slide}
+              index={si}
+              onDetect={() => runDetection(si)}
+              onToggleText={(bi) => toggleTextBlock(si, bi)}
+              onToggleImage={(bi) => toggleImageBlock(si, bi)}
+              onSelectAll={() => selectAll(si)}
+              onSetMode={(mode) => setSlideMode(si, mode)}
+              onExportSlide={() => exportSlide(si)}
+            />
+          ))}
+        </div>
+      )}
+
+      {phase === 'exporting' && (
+        <div className="ed-progress">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="spinner" />
+            <span className="progress-label">Generazione PPTX in corso...</span>
+          </div>
+        </div>
+      )}
+
+      {phase === 'done' && (
+        <div className="export-done">
+          <div style={{ fontSize: 48 }}>✅</div>
+          <h2>Export completato!</h2>
+          <p>Il file PPTX è stato scaricato automaticamente.</p>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button className="btn btn-ghost" onClick={() => setPhase('slides')}>
+              Torna alle slide
+            </button>
+            <button className="btn btn-primary" onClick={onReset}>
+              Nuovo PDF
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── UploadZone sub-component ─────────────────────────────────────────────────
+
+function UploadZone({ isDragOver, onDragOver, onDragLeave, onDrop, onClick, maxPages, error, children }) {
+  return (
+    <div className="ed-upload">
+      {error && <div className="ed-error" style={{ maxWidth: 520 }}>{error}</div>}
+      <div
+        className={`upload-zone${isDragOver ? ' drag-over' : ''}`}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        onClick={onClick}
+      >
+        <div className="upload-icon"><IconUpload /></div>
+        <div className="upload-title">Carica il tuo PDF</div>
+        <div className="upload-sub">
+          Trascina qui o clicca per scegliere un file
+          <br />
+          Max {maxPages} pagine per il tuo piano
+        </div>
+        <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); onClick(); }}>
+          Scegli file
+        </button>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── SlideCard sub-component ──────────────────────────────────────────────────
+
+function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSelectAll, onSetMode, onExportSlide }) {
+  const { origDataUrl, detection, grabbedTextIndices, grabbedImageIndices, mode, exporting } = slide;
+  const det = detection;
+  const isLoading = det.status === 'loading';
+  const isDone = det.status === 'done';
+  const isError = det.status === 'error';
+
+  const totalText = isDone ? det.textBlocks.length : 0;
+  const totalImages = isDone ? det.imageRegions.length : 0;
+  const totalBlocks = totalText + totalImages;
+  const totalGrabbed = grabbedTextIndices.size + grabbedImageIndices.size;
+
+  // mode === 'pristine': show toolbar with Cattura buttons
+  // mode === 'detected': show results overlay + primary actions
+  // mode === 'selecting': show manual selection mode
+
+  const isPristine = mode === 'pristine';
+  const isDetected = mode === 'detected';
+  const isSelecting = mode === 'selecting';
+
+  return (
+    <div className="slide-wrap">
+      <div className="slide-label">
+        Slide {index + 1}
+        {isDetected && totalBlocks > 0 && (
+          <span style={{ marginLeft: 8, color: 'var(--accent)', fontWeight: 600 }}>
+            · pronto per l'export
+          </span>
+        )}
+        {isSelecting && (
+          <span style={{ marginLeft: 8, color: 'var(--text-dim)', fontWeight: 500 }}>
+            · {totalGrabbed} / {totalBlocks} selezionat{totalGrabbed !== 1 ? 'i' : 'o'}
+          </span>
+        )}
       </div>
 
-      <div className="editor-main">
-        <div className="editor-content">
-          <div className="slide-viewport" ref={viewportRef}>
-            <div className="slide-layer" style={{ zIndex: 1 }}>
-              <img className="slide-bg" src={slide.origDataUrl} alt="slide" />
-            </div>
+      <div className="slide-canvas-wrap">
+        {/* Background image */}
+        <img className="slide-bg-img" src={origDataUrl} alt={`Slide ${index + 1}`} draggable={false} />
 
-            <div className="slide-layer" style={{ zIndex: 2 }} id="shapesLayer">
-              {slide.shapes?.map((sh, idx) => (
-                <div key={idx} className="shape-block" style={{
-                  left: sh.x * 100 + '%', top: sh.y * 100 + '%',
-                  width: sh.w * 100 + '%', height: sh.h * 100 + '%',
-                  backgroundColor: sh.fillColor || 'transparent',
-                  borderRadius: sh.rounded ? '8px' : '0'
-                }} />
-              ))}
-            </div>
-
-            <div className="slide-layer" style={{ zIndex: 3 }} id="imagesLayer">
-              {slide.extracted?.map((ei, idx) => (
-                <img key={idx} className="image-block" src={ei.dataUrl} alt="extracted" style={{
-                  left: ei.region.x * 100 + '%', top: ei.region.y * 100 + '%',
-                  width: ei.region.w * 100 + '%', height: ei.region.h * 100 + '%'
-                }} />
-              ))}
-            </div>
-
-            <div className="slide-layer" style={{ zIndex: 4 }} id="textLayer">
-              {slide.blocks.map((b, bIdx) => {
-                const nLines = Math.max(b.numLines || 1, 1);
-                const blockHPx = b.h * vpH;
-                const lineHPx = blockHPx / nLines;
-                const geoFsPx = Math.max(8, Math.min(48, Math.round(lineHPx / 1.35)));
-                const aiFsPx = b.aiFontSize ? Math.round(b.aiFontSize * 1.33) : 0;
-                const fsPx = (aiFsPx >= 10 && aiFsPx <= 64) ? aiFsPx : geoFsPx;
-
-                return (
-                  <div
-                    key={bIdx}
-                    data-block-idx={bIdx}
-                    className={`text-block ${canDragResize ? 'text-block-draggable' : ''}`}
-                    contentEditable
-                    suppressContentEditableWarning
-                    spellCheck={false}
-                    onInput={(e) => handleTextEdit(currentSlideIdx, bIdx, e.currentTarget.textContent)}
-                    onPointerDown={(e) => handleTextBlockPointerDown(e, bIdx)}
-                    style={{
-                      left: b.x * 100 + '%',
-                      top: b.y * 100 + '%',
-                      width: b.w * 100 + '%',
-                      height: b.h * 100 + '%',
-                      fontSize: fsPx + 'px',
-                      color: '#' + (b.pixelColor || '000000'),
-                      backgroundColor: b.bgColor || 'transparent',
-                      fontWeight: (b.aiBold || (fsPx >= 20 && nLines <= 3)) ? 'bold' : 'normal'
-                    }}
-                  >
-                    {b.text}
-                    {canDragResize && <div className="text-block-resize-handle" />}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="nav-buttons">
-            <button className="nav-btn" disabled={currentSlideIdx === 0} onClick={() => setCurrentSlideIdx(currentSlideIdx - 1)}>‹</button>
-            <div className="slide-info">{currentSlideIdx + 1} / {allSlides.length}</div>
-            <button className="nav-btn" disabled={currentSlideIdx === allSlides.length - 1} onClick={() => setCurrentSlideIdx(currentSlideIdx + 1)}>›</button>
-          </div>
-
-          <div className="thumbnails-strip">
-            {allSlides.map((s, idx) => (
+        {/* Detected mode: visible highlight overlay (non-interactive) */}
+        {isDetected && isDone && (
+          <div className="slide-overlay">
+            {det.textBlocks.map((tb, bi) => (
               <div
-                key={idx}
-                className={`thumbnail ${idx === currentSlideIdx ? 'active' : ''}`}
-                onClick={() => setCurrentSlideIdx(idx)}
+                key={`t${bi}`}
+                className="detected-block"
+                style={{
+                  left: `${(tb.x || 0) * 100}%`,
+                  top: `${(tb.y || 0) * 100}%`,
+                  width: `${(tb.w || 0) * 100}%`,
+                  height: `${(tb.h || 0) * 100}%`,
+                }}
+              />
+            ))}
+            {det.imageRegions.map((ir, bi) => (
+              <div
+                key={`i${bi}`}
+                className="detected-img-block"
+                style={{
+                  left: `${(ir.x || 0) * 100}%`,
+                  top: `${(ir.y || 0) * 100}%`,
+                  width: `${(ir.w || 0) * 100}%`,
+                  height: `${(ir.h || 0) * 100}%`,
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Selecting mode: clickable toggle blocks */}
+        {isSelecting && isDone && (
+          <div className="slide-overlay">
+            {det.textBlocks.map((tb, bi) => (
+              <div
+                key={`t${bi}`}
+                className={`select-block ${grabbedTextIndices.has(bi) ? 'included' : 'excluded'}`}
+                style={{
+                  left: `${(tb.x || 0) * 100}%`,
+                  top: `${(tb.y || 0) * 100}%`,
+                  width: `${(tb.w || 0) * 100}%`,
+                  height: `${(tb.h || 0) * 100}%`,
+                }}
+                onClick={() => onToggleText(bi)}
+                title={tb.text ? tb.text.substring(0, 80) : 'Blocco testo'}
+              />
+            ))}
+            {det.imageRegions.map((ir, bi) => (
+              <div
+                key={`i${bi}`}
+                className={`select-img-block ${grabbedImageIndices.has(bi) ? 'included' : 'excluded'}`}
+                style={{
+                  left: `${(ir.x || 0) * 100}%`,
+                  top: `${(ir.y || 0) * 100}%`,
+                  width: `${(ir.w || 0) * 100}%`,
+                  height: `${(ir.h || 0) * 100}%`,
+                }}
+                onClick={() => onToggleImage(bi)}
+                title="Regione immagine"
               >
-                <img src={s.origDataUrl} alt={`Slide ${idx + 1}`} />
+                {grabbedImageIndices.has(bi) && (
+                  <span className="select-img-badge">IMG</span>
+                )}
               </div>
             ))}
           </div>
-        </div>
+        )}
+
+        {/* Results banner — shown in detected and selecting modes */}
+        {(isDetected || isSelecting) && isDone && totalBlocks > 0 && (
+          <div className="results-banner">
+            {totalText > 0 && (
+              <span>
+                {totalText} blocch{totalText !== 1 ? 'i' : 'o'} di testo
+              </span>
+            )}
+            {totalText > 0 && totalImages > 0 && (
+              <div className="results-banner-sep" />
+            )}
+            {totalImages > 0 && (
+              <span className="results-banner-img">
+                {totalImages} immagin{totalImages !== 1 ? 'i' : 'e'}
+              </span>
+            )}
+            {isSelecting && (
+              <>
+                <div className="results-banner-sep" />
+                <span style={{ color: 'var(--text-dim)', fontWeight: 500, fontSize: 12 }}>
+                  {totalGrabbed} / {totalBlocks} sel.
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Pristine toolbar: Cattura testo / Cattura immagini */}
+        {isPristine && (
+          <div className="slide-toolbar">
+            <button
+              className={`tb-btn${isLoading ? ' loading' : ''}`}
+              onClick={!isLoading ? onDetect : undefined}
+              disabled={isLoading}
+              title="Analizza testo e immagini con AI"
+            >
+              {isLoading ? <div className="spinner" /> : <IconText />}
+              {isLoading ? 'Analisi...' : 'Cattura testo'}
+            </button>
+
+            <div className="toolbar-divider" />
+
+            <button
+              className={`tb-btn${isLoading ? ' loading' : ''}`}
+              onClick={!isLoading ? onDetect : undefined}
+              disabled={isLoading}
+              title="Analizza immagini con AI"
+            >
+              {isLoading ? <div className="spinner" /> : <IconPhoto />}
+              {isLoading ? 'Analisi...' : 'Cattura immagini'}
+            </button>
+
+            {isError && (
+              <>
+                <div className="toolbar-divider" />
+                <span style={{ fontSize: 11, color: 'var(--error)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {det.error}
+                </span>
+                <button
+                  className="tb-btn"
+                  onClick={onDetect}
+                  style={{ color: 'var(--error)', borderColor: 'rgba(248,113,113,0.3)' }}
+                >
+                  Riprova
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Detected mode actions: Scarica PPTX + Seleziona manualmente */}
+        {isDetected && isDone && (
+          <div className="slide-actions">
+            <button
+              className="btn-download-slide"
+              onClick={onExportSlide}
+              disabled={exporting || totalGrabbed === 0}
+            >
+              {exporting ? <div className="spinner" style={{ borderTopColor: '#111' }} /> : <IconDownload />}
+              {exporting ? 'Generazione...' : 'Scarica PPTX'}
+            </button>
+            {totalBlocks > 0 && (
+              <button
+                className="btn-select-manual"
+                onClick={() => onSetMode('selecting')}
+              >
+                Seleziona manualmente
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Selecting mode actions: Scarica PPTX + Torna */}
+        {isSelecting && isDone && (
+          <div className="slide-actions">
+            <button
+              className="btn-select-back"
+              onClick={() => { onSelectAll(); onSetMode('detected'); }}
+            >
+              Annulla
+            </button>
+            <button
+              className="btn-download-slide"
+              onClick={onExportSlide}
+              disabled={exporting || totalGrabbed === 0}
+            >
+              {exporting ? <div className="spinner" style={{ borderTopColor: '#111' }} /> : <IconDownload />}
+              {exporting
+                ? 'Generazione...'
+                : totalGrabbed === 0
+                  ? 'Nessun elemento'
+                  : `Scarica PPTX (${totalGrabbed})`}
+            </button>
+          </div>
+        )}
+
+        {/* No-results state in detected mode */}
+        {(isDetected || isSelecting) && isDone && totalBlocks === 0 && (
+          <div className="slide-actions">
+            <span style={{ fontSize: 13, color: 'var(--text-dim)', background: 'rgba(20,18,17,0.85)', padding: '8px 16px', borderRadius: 8, backdropFilter: 'blur(10px)' }}>
+              Nessun elemento rilevato
+            </span>
+            <button className="btn-select-manual" onClick={() => onSetMode('pristine')}>
+              Riprova
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
