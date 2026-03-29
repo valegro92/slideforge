@@ -2,10 +2,6 @@
   "framework": "nextjs",
   "buildCommand": "next build",
   "outputDirectory": ".next",
-  "env": [
-    "OPENROUTER_API_KEY",
-    "NEXT_PUBLIC_APP_URL"
-  ],
   "functions": {
     "src/app/api/**": {
       "maxDuration": 60
