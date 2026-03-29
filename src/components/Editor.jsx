@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TIERS, getMaxPages } from '../lib/tiers';
+import { useTier } from '../lib/TierContext';
 
 const SLIDE_PROMPT = `You are converting a rasterized presentation slide into separate editable elements for PowerPoint.
 
@@ -437,7 +438,8 @@ const STYLES = `
   }
 `;
 
-export default function Editor({ tier = 'free' }) {
+export default function Editor() {
+  const { tier } = useTier();
   const [allSlides, setAllSlides] = useState([]);
   const [currentSlideIdx, setCurrentSlideIdx] = useState(0);
   const [fileName, setFileName] = useState('');

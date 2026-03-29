@@ -18,7 +18,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { supabaseAdmin, isSupabaseAdminConfigured } from '@/lib/supabase';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
 // ---------------------------------------------------------------------------
 // CORS headers — applied to every response
@@ -165,8 +165,8 @@ function checkFallbackList(normalizedEmail) {
  * @returns {Promise<{ authorized: boolean, tier: string, email?: string }>}
  */
 async function checkSupabase(normalizedEmail) {
-  const { data, error } = await supabaseAdmin
-    .from('slideforge_subscribers')
+  const { data, error } = await supabase
+    .from('subscribers')
     .select('email, tier')
     .eq('email', normalizedEmail)
     .eq('active', true)
@@ -239,7 +239,7 @@ export async function POST(request) {
   }
 
   // --- Primary path: Supabase ---
-  if (isSupabaseAdminConfigured()) {
+  if (isSupabaseConfigured()) {
     try {
       const result = await checkSupabase(normalizedEmail);
       return respond(result);
