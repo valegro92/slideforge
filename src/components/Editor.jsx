@@ -911,7 +911,8 @@ export default function Editor({ onReset }) {
   }, []);
 
   // ── Acquire text: inpaint slide and enter editing mode ──────────────────
-  const acquireText = useCallback(async (slideIndex) => {
+  // mode: 'text' = acquire text only, 'all' = acquire text + images
+  const acquireText = useCallback(async (slideIndex, inpaintMode = 'text') => {
     // Set processing mode
     setSlides(prev => {
       const next = [...prev];
@@ -924,7 +925,7 @@ export default function Editor({ onReset }) {
       const resp = await fetch('/api/inpaint', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: slide.origDataUrl }),
+        body: JSON.stringify({ image: slide.origDataUrl, mode: inpaintMode }),
       });
 
       if (!resp.ok) {
@@ -1260,7 +1261,8 @@ export default function Editor({ onReset }) {
               onSelectAll={() => selectAll(si)}
               onSetMode={(mode) => setSlideMode(si, mode)}
               onExportSlide={() => exportSlide(si)}
-              onAcquireText={() => acquireText(si)}
+              onAcquireText={() => acquireText(si, 'text')}
+              onAcquireAll={() => acquireText(si, 'all')}
               onUpdateText={(bi, text) => updateBlockText(si, bi, text)}
             />
           ))}
@@ -1326,7 +1328,7 @@ function UploadZone({ isDragOver, onDragOver, onDragLeave, onDrop, onClick, maxP
 
 // ─── SlideCard sub-component ──────────────────────────────────────────────────
 
-function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSelectAll, onSetMode, onExportSlide, onAcquireText, onUpdateText }) {
+function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSelectAll, onSetMode, onExportSlide, onAcquireText, onAcquireAll, onUpdateText }) {
   const { origDataUrl, detection, grabbedTextIndices, grabbedImageIndices, mode, exporting } = slide;
   const det = detection;
   const isLoading = det.status === 'loading';
@@ -1577,7 +1579,7 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
           </div>
         )}
 
-        {/* Detected mode actions: Acquisisci testo + Seleziona manualmente */}
+        {/* Detected mode actions: Acquisisci testo / Acquisisci immagini / Seleziona */}
         {isDetected && isDone && totalBlocks > 0 && (
           <div className="slide-actions">
             <button
@@ -1587,10 +1589,17 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
               <IconText /> Acquisisci testo
             </button>
             <button
+              className="btn-download-slide"
+              onClick={onAcquireAll}
+              style={{ background: '#63a5d4', boxShadow: '0 4px 16px rgba(99,165,212,0.35)' }}
+            >
+              <IconPhoto /> Acquisisci immagini
+            </button>
+            <button
               className="btn-select-manual"
               onClick={() => onSetMode('selecting')}
             >
-              Seleziona manualmente
+              Seleziona
             </button>
           </div>
         )}

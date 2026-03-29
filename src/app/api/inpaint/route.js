@@ -37,7 +37,9 @@ export async function POST(request) {
       );
     }
 
-    const cleanedImage = await eraseTextWithAI(apiKey, body.image);
+    // mode: 'text' = remove only text, 'all' = remove text + images
+    const mode = body.mode === 'all' ? 'all' : 'text';
+    const cleanedImage = await eraseTextWithAI(apiKey, body.image, mode);
 
     return new Response(
       JSON.stringify({ cleanedImage }),
