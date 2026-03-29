@@ -806,20 +806,14 @@ export default function Editor() {
               const pxBottom = Math.round(((tb.y || 0) + (tb.h || 0.05)) * canvas.height);
               const bg = sampleBg(imgData.data, canvas.width, canvas.height, pxLeft, pxTop, pxRight, pxBottom);
               const tc = getTextColor(imgData.data, canvas.width, canvas.height, pxLeft, pxTop, pxRight, pxBottom, bg);
-              return {
+              const colorHex = tc.map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
+              blocks.push({
                 text: tb.text || '', x: tb.x || 0, y: tb.y || 0, w: tb.w || 0.1, h: tb.h || 0.05,
                 numLines: (tb.text || '').split('\n').length,
                 pxLeft, pxTop, pxRight, pxBottom, aiFontSize: tb.fontSize || null, aiBold: tb.bold || false,
-              };
-            });
-
-            for (const tb of textBlocks) {
-              blocks.push({
-                text: tb.text, x: tb.x, y: tb.y, w: tb.w, h: tb.h, numLines: tb.numLines,
-                pxLeft: tb.pxLeft, pxTop: tb.pxTop, pxRight: tb.pxRight, pxBottom: tb.pxBottom,
-                aiFontSize: tb.aiFontSize, aiBold: tb.aiBold, overImage: false, pixelColor: '000000', bgColor: '#FFFFFF'
+                overImage: false, pixelColor: colorHex, bgColor: `rgb(${bg[0]},${bg[1]},${bg[2]})`
               });
-            }
+            });
           } else {
             // AI failed or returned empty — fallback to OCR for this slide
             setProgressMsg(`Slide ${i}/${n} — OCR fallback...`);
@@ -1166,7 +1160,7 @@ export default function Editor() {
         <div className="editor-content">
           <div className="slide-viewport" ref={viewportRef}>
             <div className="slide-layer" style={{ zIndex: 1 }}>
-              <img className="slide-bg" src={slide.cleanedDataUrl} alt="slide" />
+              <img className="slide-bg" src={slide.origDataUrl} alt="slide" />
             </div>
 
             <div className="slide-layer" style={{ zIndex: 2 }} id="shapesLayer">
@@ -1215,7 +1209,7 @@ export default function Editor() {
                       height: b.h * 100 + '%',
                       fontSize: fsPx + 'px',
                       color: '#' + (b.pixelColor || '000000'),
-                      backgroundColor: 'transparent',
+                      backgroundColor: b.bgColor || 'transparent',
                       fontWeight: (b.aiBold || (fsPx >= 20 && nLines <= 3)) ? 'bold' : 'normal'
                     }}
                   >
@@ -1240,7 +1234,7 @@ export default function Editor() {
                 className={`thumbnail ${idx === currentSlideIdx ? 'active' : ''}`}
                 onClick={() => setCurrentSlideIdx(idx)}
               >
-                <img src={s.cleanedDataUrl} alt={`Slide ${idx + 1}`} />
+                <img src={s.origDataUrl} alt={`Slide ${idx + 1}`} />
               </div>
             ))}
           </div>
