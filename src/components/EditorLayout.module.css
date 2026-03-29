@@ -1,0 +1,155 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+}
+
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  background: #1c1917;
+  border-bottom: 1px solid #44403c;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  z-index: 1000;
+}
+
+.leftSection {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.logo {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fafaf9;
+  letter-spacing: -0.5px;
+}
+
+.logoAccent {
+  color: #2DD4A8;
+}
+
+.centerSection {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.tierBadge {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  transition: all 0.2s ease;
+}
+
+.tierBadge:hover {
+  transform: translateY(-2px);
+}
+
+.rightSection {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+}
+
+.upgradeButton {
+  padding: 8px 16px;
+  background: #2DD4A8;
+  color: #292524;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.upgradeButton:hover {
+  background: #23c197;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(45, 212, 168, 0.3);
+}
+
+.upgradeButton:active {
+  transform: translateY(0);
+}
+
+.homeLink {
+  color: #a8a29e;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.homeLink:hover {
+  color: #fafaf9;
+}
+
+.main {
+  margin-top: 48px;
+  flex: 1;
+  overflow: auto;
+  background: #292524;
+}
+
+@media (max-width: 768px) {
+  .navbar {
+    padding: 0 16px;
+  }
+
+  .logo {
+    font-size: 14px;
+  }
+
+  .tierBadge {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+
+  .rightSection {
+    gap: 12px;
+  }
+
+  .upgradeButton {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .homeLink {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  .centerSection {
+    display: none;
+  }
+
+  .leftSection {
+    flex: 1;
+  }
+
+  .rightSection {
+    flex: 1;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .upgradeButton {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+}
