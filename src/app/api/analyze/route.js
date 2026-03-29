@@ -28,7 +28,6 @@ const requestCounts = new Map();
  * Rate limit by tier (requests per hour)
  */
 const RATE_LIMITS = {
-  free: 10,
   pro: 200,
   enterprise: 1000,
 };
@@ -106,8 +105,8 @@ function validateRequest(body) {
 
   if (!body.tier) {
     errors.push('Missing required field: tier');
-  } else if (!['free', 'pro', 'enterprise', 'admin'].includes(body.tier)) {
-    errors.push('Invalid tier: must be free, pro, enterprise, or admin');
+  } else if (!['pro', 'enterprise', 'admin'].includes(body.tier)) {
+    errors.push('Invalid tier: must be pro, enterprise, or admin');
   }
 
   return { valid: errors.length === 0, errors };
@@ -165,6 +164,20 @@ export async function POST(request) {
 
     const { image } = body;
     const tier = resolveTier(body.tier);
+
+    // Block any tier that is not a paid subscriber tier
+    if (!['pro', 'enterprise'].includes(tier)) {
+      return new Response(
+        JSON.stringify({
+          error: 'Accesso riservato agli iscritti de La Cassetta degli AI-trezzi'
+        }),
+        {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
     const model = body.model || getModelForTier(tier);
 
     if (!model) {

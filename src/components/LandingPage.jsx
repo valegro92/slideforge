@@ -327,8 +327,10 @@ const LandingPage = () => {
             <span style={{ fontSize: '1.1rem' }}>→</span>
           </Link>
 
-          <button
-            onClick={() => scrollToSection('pricing')}
+          <a
+            href="https://lacassettadegliaitrezzi.substack.com/"
+            target="_blank"
+            rel="noopener noreferrer"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -341,6 +343,7 @@ const LandingPage = () => {
               fontSize: '1rem',
               fontWeight: 600,
               fontFamily: 'DM Sans, sans-serif',
+              textDecoration: 'none',
               cursor: 'pointer',
               transition: 'all 0.2s',
             }}
@@ -353,8 +356,8 @@ const LandingPage = () => {
               e.currentTarget.style.color = theme.stone300;
             }}
           >
-            Scopri L'Officina
-          </button>
+            Abbonati alla Cassetta
+          </a>
         </div>
 
         {/* Social proof */}
@@ -641,102 +644,10 @@ const LandingPage = () => {
 
           <div
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-              gap: '1.5rem',
-              alignItems: 'start',
+              display: 'flex',
+              justifyContent: 'center',
             }}
           >
-            {/* Free plan */}
-            <div
-              style={{
-                backgroundColor: theme.stone700,
-                border: `1px solid ${theme.stone600}`,
-                borderRadius: '1rem',
-                padding: '2rem',
-              }}
-            >
-              <p
-                style={{
-                  fontSize: '0.85rem',
-                  fontWeight: 600,
-                  color: theme.stone400,
-                  marginBottom: '0.5rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                }}
-              >
-                Prova gratuita
-              </p>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: '0.375rem',
-                  marginBottom: '1.5rem',
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: '2.5rem',
-                    fontWeight: 800,
-                    color: theme.stone50,
-                    letterSpacing: '-0.03em',
-                  }}
-                >
-                  €0
-                </span>
-              </div>
-              <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 2rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {[
-                  'Fino a 3 pagine per PDF',
-                  'OCR offline (Tesseract)',
-                  'Export PPTX',
-                  'Nessuna registrazione',
-                ].map((feat) => (
-                  <li
-                    key={feat}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.625rem',
-                      fontSize: '0.9rem',
-                      color: theme.stone400,
-                    }}
-                  >
-                    <span style={{ color: theme.stone500, fontSize: '1rem' }}>·</span>
-                    {feat}
-                  </li>
-                ))}
-              </ul>
-              <Link
-                href="/app"
-                style={{
-                  display: 'block',
-                  textAlign: 'center',
-                  border: `1px solid ${theme.stone600}`,
-                  color: theme.stone300,
-                  padding: '0.75rem',
-                  borderRadius: '0.5rem',
-                  fontSize: '0.9rem',
-                  fontWeight: 600,
-                  fontFamily: 'DM Sans, sans-serif',
-                  textDecoration: 'none',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = theme.stone400;
-                  e.currentTarget.style.color = theme.stone50;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = theme.stone600;
-                  e.currentTarget.style.color = theme.stone300;
-                }}
-              >
-                Prova gratis
-              </Link>
-            </div>
-
             {/* Paid plan */}
             <div
               style={{
@@ -850,7 +761,9 @@ const LandingPage = () => {
               </ul>
 
               <a
-                href="#"
+                href="https://lacassettadegliaitrezzi.substack.com/"
+                target="_blank"
+                rel="noopener noreferrer"
                 style={{
                   display: 'block',
                   textAlign: 'center',
@@ -936,10 +849,6 @@ const LandingPage = () => {
               a: 'No. Il PDF viene elaborato in memoria e il PPTX generato viene inviato direttamente al tuo browser. Non conserviamo nessun contenuto dei tuoi documenti.',
             },
             {
-              q: 'Qual è la differenza tra OCR offline e AI Vision?',
-              a: "L'OCR offline (Tesseract) funziona senza connessione e ha qualità base: riconosce il testo ma può sbagliare con font particolari. AI Vision usa Gemini 2.5 Flash e riconosce testo, tabelle, formule e layout complessi con precisione molto maggiore.",
-            },
-            {
               q: "Come funziona L'Officina?",
               a: "L'Officina è un abbonamento mensile a €11.90 che ti dà accesso a tutte le app che costruiamo per gli iscritti de La Cassetta degli AI-trezzi. Ogni mese una nuova app professionale. SlideForge è quella attuale.",
             },
@@ -980,7 +889,7 @@ const LandingPage = () => {
 
           <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
             <a
-              href="https://lacassettadegliaitrezzi.it"
+              href="https://lacassettadegliaitrezzi.substack.com/"
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -1022,7 +931,7 @@ const LandingPage = () => {
               onMouseEnter={(e) => (e.currentTarget.style.color = theme.teal)}
               onMouseLeave={(e) => (e.currentTarget.style.color = theme.stone400)}
             >
-              Prova gratis
+              App
             </Link>
           </div>
 

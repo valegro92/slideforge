@@ -773,11 +773,10 @@ function createSlideState(origDataUrl, width, height) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Editor({ onReset }) {
-  const { tier: rawTier } = useTier();
-  const tier = resolveTier(rawTier || 'free');
+  const { tier: rawTier, isLoggedIn } = useTier();
+  const tier = resolveTier(rawTier || '');
   const maxPages = getMaxPages(tier);
-  const tierConfig = TIERS[tier] || TIERS.free;
-  const needsWatermark = tierConfig.watermark !== false;
+  const tierConfig = TIERS[tier] || null;
 
   const [phase, setPhase] = useState('upload'); // 'upload' | 'rendering' | 'slides' | 'exporting' | 'done'
   const [renderProgress, setRenderProgress] = useState({ done: 0, total: 0, label: '' });
@@ -993,12 +992,7 @@ export default function Editor({ onReset }) {
 
       pSlide.addImage({ data: bgDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
 
-      if (needsWatermark) {
-        pSlide.addText('SlideForge', {
-          x: 0.2, y: SLIDE_H - 0.4, w: 3, h: 0.3,
-          fontSize: 9, color: 'AAAAAA', transparency: 50, fontFace: 'Arial'
-        });
-      }
+
 
       if (!hasAnyGrabbed) continue;
 
@@ -1065,7 +1059,7 @@ export default function Editor({ onReset }) {
 
     const safeName = name.replace(/[^a-z0-9_-]/gi, '_') || 'slideforge';
     await pptx.writeFile({ fileName: `${safeName}.pptx` });
-  }, [needsWatermark]);
+  }, []);
 
   // ── Export single slide ───────────────────────────────────────────────────
 
@@ -1117,6 +1111,53 @@ export default function Editor({ onReset }) {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
+  // ── Auth gate ─────────────────────────────────────────────────────────────
+  if (!isLoggedIn || !tierConfig) {
+    return (
+      <div className="ed-root">
+        <header className="ed-header">
+          <span className="ed-logo">SlideForge</span>
+        </header>
+        <div className="ed-upload">
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 480,
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 16,
+              padding: '48px 40px',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 16,
+            }}
+          >
+            <div style={{ fontSize: 40, marginBottom: 4 }}>🔒</div>
+            <div className="upload-title">Accedi con la tua email per usare SlideForge</div>
+            <div className="upload-sub" style={{ marginBottom: 0 }}>
+              Riservato agli iscritti de La Cassetta degli AI-trezzi
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <button className="btn btn-primary" onClick={onReset}>
+                Accedi
+              </button>
+              <a
+                href="https://lacassettadegliaitrezzi.substack.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-ghost"
+              >
+                Abbonati alla Cassetta
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="ed-root">
       {/* Header */}
@@ -1131,9 +1172,6 @@ export default function Editor({ onReset }) {
           <span className="tier-badge">{tierConfig.name}</span>
           {phase === 'slides' && (
             <>
-              {needsWatermark && (
-                <span className="watermark-notice">Export con watermark</span>
-              )}
               <button className="btn btn-ghost btn-sm" onClick={onReset}>
                 Nuovo PDF
               </button>

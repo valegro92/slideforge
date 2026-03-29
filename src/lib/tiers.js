@@ -10,19 +10,6 @@ export function resolveTier(tier) {
 }
 
 export const TIERS = {
-  free: {
-    name: 'Free',
-    maxPages: 3,
-    models: ['offline'], // Tesseract only
-    watermark: true,
-    price: 0,
-    features: [
-      '3 pagine per PDF',
-      'OCR offline (Tesseract)',
-      'Export con watermark'
-    ]
-  },
-
   pro: {
     name: 'Pro',
     maxPages: 50,
@@ -96,7 +83,7 @@ export function canUseTier(tier, feature) {
  * @returns {number}
  */
 export function getMaxPages(tier) {
-  return TIERS[tier]?.maxPages || 3;
+  return TIERS[tier]?.maxPages || 0;
 }
 
 /**
@@ -106,7 +93,6 @@ export function getMaxPages(tier) {
  * @returns {boolean}
  */
 export function canUseModel(tier, model) {
-  if (model === 'offline') return true; // offline always allowed
   const tierConfig = TIERS[tier];
   if (!tierConfig) return false;
   return tierConfig.models.includes(model);
