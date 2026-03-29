@@ -2,10 +2,14 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import LoginModal from './LoginModal';
+import { useTier } from '../lib/TierContext';
 
 const LandingPage = () => {
   const [scrollY, setScrollY] = useState(0);
   const [visibleSections, setVisibleSections] = useState({});
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const { login, isLoggedIn, user, logout } = useTier();
 
   useEffect(() => {
     const handleScroll = () => setScrollY(window.scrollY);
@@ -42,6 +46,11 @@ const LandingPage = () => {
     if (element) {
       element.scrollIntoView({ behavior: 'smooth' });
     }
+  };
+
+  const handleLogin = ({ email, tier }) => {
+    login({ email, tier });
+    setShowLoginModal(false);
   };
 
   // CSS Variables for theming
@@ -126,6 +135,71 @@ const LandingPage = () => {
             >
               Come funziona
             </button>
+            {isLoggedIn ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <span
+                  style={{
+                    fontSize: '0.875rem',
+                    color: theme.teal,
+                    fontFamily: 'DM Sans, sans-serif',
+                    fontWeight: 600,
+                  }}
+                >
+                  {user?.email}
+                </span>
+                <button
+                  onClick={logout}
+                  style={{
+                    background: 'none',
+                    border: `1px solid ${theme.stone600}`,
+                    color: theme.stone300,
+                    padding: '0.625rem 1.25rem',
+                    borderRadius: '0.375rem',
+                    fontSize: '0.95rem',
+                    fontWeight: 600,
+                    fontFamily: 'DM Sans, sans-serif',
+                    transition: 'all 0.3s',
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.borderColor = theme.teal;
+                    e.target.style.color = theme.teal;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.borderColor = theme.stone600;
+                    e.target.style.color = theme.stone300;
+                  }}
+                >
+                  Esci
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowLoginModal(true)}
+                style={{
+                  background: 'none',
+                  border: `1px solid ${theme.stone600}`,
+                  color: theme.stone300,
+                  padding: '0.625rem 1.25rem',
+                  borderRadius: '0.375rem',
+                  fontSize: '0.95rem',
+                  fontWeight: 600,
+                  fontFamily: 'DM Sans, sans-serif',
+                  transition: 'all 0.3s',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.borderColor = theme.teal;
+                  e.target.style.color = theme.teal;
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.borderColor = theme.stone600;
+                  e.target.style.color = theme.stone300;
+                }}
+              >
+                Accedi
+              </button>
+            )}
             <Link
               href="/app"
               style={{
@@ -457,8 +531,8 @@ const LandingPage = () => {
                 : 'none',
             }}
           >
-            L'AI Vision decompone ogni slide in testo, immagini e forme. Tu modifichi tutto
-            nell'editor e esporti.
+            Hai un PDF da NotebookLM, Canva o Google Slides? L'AI Vision decompone ogni slide in
+            testo, immagini e forme. Tu modifichi tutto nell'editor e esporti in PPTX.
           </p>
 
           {/* CTA Buttons */}
@@ -587,8 +661,8 @@ const LandingPage = () => {
                   fontFamily: 'DM Sans, sans-serif',
                 }}
               >
-                NotebookLM, Canva, Google Slides esportano PDF con slide 100% immagine. Zero
-                testo estraibile. Impossibile modificare.
+                NotebookLM, Canva, Google Slides e molti altri tool esportano PDF con slide 100%
+                immagine. Zero testo estraibile. Impossibile modificarle senza rifare tutto da zero.
               </p>
             </article>
 
@@ -935,12 +1009,32 @@ const LandingPage = () => {
               fontSize: '1.1rem',
               textAlign: 'center',
               color: theme.stone400,
-              marginBottom: '3.5rem',
+              marginBottom: '2rem',
               fontFamily: 'DM Sans, sans-serif',
             }}
           >
             Scegli quello che fa per te
           </p>
+
+          <div
+            style={{
+              backgroundColor: `${theme.teal}15`,
+              border: `1px solid ${theme.teal}50`,
+              borderRadius: '0.5rem',
+              padding: '1rem 1.5rem',
+              textAlign: 'center',
+              marginBottom: '2.5rem',
+              fontFamily: 'DM Sans, sans-serif',
+              fontSize: '0.95rem',
+              color: theme.stone300,
+            }}
+          >
+            Sei un abbonato de{' '}
+            <span style={{ color: theme.teal, fontWeight: 700 }}>
+              La Cassetta degli AI-trezzi
+            </span>
+            ? Accedi con la tua email per sbloccare il piano Pro gratuitamente.
+          </div>
 
           <div
             style={{
@@ -960,13 +1054,14 @@ const LandingPage = () => {
                   'OCR offline',
                   'Export con watermark',
                 ],
-                cta: 'Inizia gratis',
+                cta: 'Prova gratis',
                 highlighted: false,
               },
               {
                 name: 'PRO',
                 price: '€9.99',
                 period: '/mese',
+                description: 'Gratuito per gli abbonati de La Cassetta degli AI-trezzi',
                 features: [
                   '50 pagine/PDF',
                   'AI Vision (4 modelli)',
@@ -974,7 +1069,7 @@ const LandingPage = () => {
                   'Drag & resize testo',
                   'Supporto email',
                 ],
-                cta: 'Attiva Pro',
+                cta: 'Accedi con email',
                 highlighted: true,
               },
               {
@@ -1069,6 +1164,19 @@ const LandingPage = () => {
                   >
                     {plan.period}
                   </div>
+                  {plan.description && (
+                    <div
+                      style={{
+                        marginTop: '0.625rem',
+                        fontSize: '0.8rem',
+                        color: theme.teal,
+                        fontFamily: 'DM Sans, sans-serif',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {plan.description}
+                    </div>
+                  )}
                 </div>
 
                 <ul
@@ -1106,44 +1214,66 @@ const LandingPage = () => {
                   ))}
                 </ul>
 
-                <Link
-                  href={plan.name === 'FREE' ? '/app' : plan.name === 'PRO' ? '/app?plan=pro' : '#'}
-                  style={{
-                    backgroundColor: plan.highlighted ? theme.amber : 'transparent',
-                    color: plan.highlighted ? theme.dark : theme.teal,
-                    border: plan.highlighted ? 'none' : `2px solid ${theme.teal}`,
-                    padding: '0.875rem 1.5rem',
-                    borderRadius: '0.375rem',
-                    textDecoration: 'none',
-                    fontSize: '0.95rem',
-                    fontWeight: 700,
-                    fontFamily: 'DM Sans, sans-serif',
-                    textAlign: 'center',
-                    cursor: 'pointer',
-                    transition: 'all 0.3s',
-                    display: 'inline-block',
-                    width: '100%',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (plan.highlighted) {
+                {plan.name === 'PRO' ? (
+                  <button
+                    onClick={() => setShowLoginModal(true)}
+                    style={{
+                      backgroundColor: theme.amber,
+                      color: theme.dark,
+                      border: 'none',
+                      padding: '0.875rem 1.5rem',
+                      borderRadius: '0.375rem',
+                      fontSize: '0.95rem',
+                      fontWeight: 700,
+                      fontFamily: 'DM Sans, sans-serif',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s',
+                      display: 'inline-block',
+                      width: '100%',
+                    }}
+                    onMouseEnter={(e) => {
                       e.target.style.backgroundColor = '#FBBF24';
                       e.target.style.transform = 'translateY(-2px)';
-                    } else {
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = theme.amber;
+                      e.target.style.transform = 'translateY(0)';
+                    }}
+                  >
+                    {plan.cta}
+                  </button>
+                ) : (
+                  <Link
+                    href={plan.name === 'FREE' ? '/app' : '#'}
+                    style={{
+                      backgroundColor: 'transparent',
+                      color: theme.teal,
+                      border: `2px solid ${theme.teal}`,
+                      padding: '0.875rem 1.5rem',
+                      borderRadius: '0.375rem',
+                      textDecoration: 'none',
+                      fontSize: '0.95rem',
+                      fontWeight: 700,
+                      fontFamily: 'DM Sans, sans-serif',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s',
+                      display: 'inline-block',
+                      width: '100%',
+                    }}
+                    onMouseEnter={(e) => {
                       e.target.style.backgroundColor = `${theme.teal}20`;
                       e.target.style.transform = 'translateY(-2px)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (plan.highlighted) {
-                      e.target.style.backgroundColor = theme.amber;
-                    } else {
+                    }}
+                    onMouseLeave={(e) => {
                       e.target.style.backgroundColor = 'transparent';
-                    }
-                    e.target.style.transform = 'translateY(0)';
-                  }}
-                >
-                  {plan.cta}
-                </Link>
+                      e.target.style.transform = 'translateY(0)';
+                    }}
+                  >
+                    {plan.cta}
+                  </Link>
+                )}
               </article>
             ))}
           </div>
@@ -1233,6 +1363,7 @@ const LandingPage = () => {
               '🇮🇹 Made in Italy',
               '🔒 Privacy-first',
               '⚡ No server-side processing',
+              '🧰 La Cassetta degli AI-trezzi',
             ].map((badge, idx) => (
               <div
                 key={idx}
@@ -1295,7 +1426,7 @@ const LandingPage = () => {
                   fontFamily: 'DM Sans, sans-serif',
                 }}
               >
-                Un progetto de L'Officina della Cassetta degli AI-trezzi
+                Uno strumento de La Cassetta degli AI-trezzi
               </p>
             </div>
 
@@ -1389,6 +1520,13 @@ const LandingPage = () => {
           </div>
         </div>
       </footer>
+
+      {/* Login Modal */}
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onLogin={handleLogin}
+      />
 
       {/* Global Keyframe Animations */}
       <style jsx global>{`

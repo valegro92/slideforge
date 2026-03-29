@@ -1,11 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { useTier } from '@/lib/TierContext';
+import LoginModal from './LoginModal';
 import Link from 'next/link';
 import styles from './EditorLayout.module.css';
 
 export default function EditorLayout({ children }) {
-  const { tier } = useTier();
+  const { tier, login, logout, isLoggedIn, user } = useTier();
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
   const tierBadgeColor = {
     free: '#6B7280',
@@ -38,13 +41,25 @@ export default function EditorLayout({ children }) {
           >
             {tier.toUpperCase()}
           </div>
+          {isLoggedIn && user?.email && (
+            <span className={styles.userEmail}>{user.email}</span>
+          )}
         </div>
 
         <div className={styles.rightSection}>
-          {tier !== 'enterprise' && (
-            <button className={styles.upgradeButton}>
-              Upgrade
+          {isLoggedIn ? (
+            <button className={styles.logoutButton} onClick={logout}>
+              Esci
             </button>
+          ) : (
+            tier !== 'pro' && tier !== 'enterprise' && (
+              <button
+                className={styles.upgradeButton}
+                onClick={() => setShowLoginModal(true)}
+              >
+                Upgrade
+              </button>
+            )
           )}
           <Link href="/" className={styles.homeLink}>
             Home
@@ -55,6 +70,15 @@ export default function EditorLayout({ children }) {
       <main className={styles.main}>
         {children}
       </main>
+
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onLogin={(userData) => {
+          login(userData);
+          setShowLoginModal(false);
+        }}
+      />
     </div>
   );
 }
