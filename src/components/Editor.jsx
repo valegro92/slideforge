@@ -950,19 +950,55 @@ export default function Editor({ onReset }) {
       const pSlide = pptx.addSlide();
       const det = slide.detection;
 
-      // 1. Background = immagine ORIGINALE (zero cleaning)
-      pSlide.addImage({ data: slide.origDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
-
-      // Skip if no text grabbed
-      if (slide.grabbedTextIndices.size === 0) continue;
-
-      // 2. Sample colors from original canvas
       let origCanvas = slide.origCanvas;
       if (!origCanvas) origCanvas = await canvasFromDataUrl(slide.origDataUrl);
       const cw = origCanvas.width, ch = origCanvas.height;
       const imgData = origCanvas.getContext('2d').getImageData(0, 0, cw, ch);
 
-      // 3. Text boxes with OPAQUE FILL — cover original rasterized text
+      // 1. Sample overall slide background color (corners)
+      const cornerPixels = [];
+      for (const [sx, sy] of [[5,5],[cw-5,5],[5,ch-5],[cw-5,ch-5]]) {
+        const i = (sy * cw + sx) * 4;
+        cornerPixels.push([imgData.data[i], imgData.data[i+1], imgData.data[i+2]]);
+      }
+      const slideBg = cornerPixels.reduce(
+        (acc, p) => [acc[0]+p[0], acc[1]+p[1], acc[2]+p[2]],
+        [0,0,0]
+      ).map(v => Math.round(v / cornerPixels.length));
+
+      // 2. Set solid background color (no rasterized image = no double text)
+      pSlide.background = { color: toHex(slideBg) };
+
+      // 3. Add cropped image regions from original
+      for (const idx of slide.grabbedImageIndices) {
+        const region = det.imageRegions[idx];
+        if (!region) continue;
+
+        const rx = Math.max(0, Math.round((region.x || 0) * cw));
+        const ry = Math.max(0, Math.round((region.y || 0) * ch));
+        const rw = Math.min(cw - rx, Math.round((region.w || 0) * cw));
+        const rh = Math.min(ch - ry, Math.round((region.h || 0) * ch));
+        if (rw < 4 || rh < 4) continue;
+
+        const crop = document.createElement('canvas');
+        crop.width = rw;
+        crop.height = rh;
+        crop.getContext('2d').drawImage(origCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
+
+        let ix = Math.max(0, (region.x || 0) * SLIDE_W);
+        let iy = Math.max(0, (region.y || 0) * SLIDE_H);
+        let iw = Math.max(0.1, (region.w || 0.1) * SLIDE_W);
+        let ih = Math.max(0.1, (region.h || 0.1) * SLIDE_H);
+        if (ix + iw > SLIDE_W) iw = SLIDE_W - ix;
+        if (iy + ih > SLIDE_H) ih = SLIDE_H - iy;
+
+        pSlide.addImage({
+          data: crop.toDataURL('image/png'),
+          x: ix, y: iy, w: iw, h: ih,
+        });
+      }
+
+      // 4. Add text boxes (editable, no background image underneath)
       for (const idx of slide.grabbedTextIndices) {
         const tb = det.textBlocks[idx];
         if (!tb) continue;
@@ -972,13 +1008,12 @@ export default function Editor({ onReset }) {
         const pxR = Math.min(cw, Math.round(((tb.x || 0) + (tb.w || 0)) * cw));
         const pxB = Math.min(ch, Math.round(((tb.y || 0) + (tb.h || 0)) * ch));
 
-        const bg = sampleBg(imgData.data, cw, ch, pxL, pxT, pxR, pxB);
+        const localBg = sampleBg(imgData.data, cw, ch, pxL, pxT, pxR, pxB);
         const tc = enforceContrast(
-          getTextColor(imgData.data, cw, ch, pxL, pxT, pxR, pxB, bg),
-          bg
+          getTextColor(imgData.data, cw, ch, pxL, pxT, pxR, pxB, localBg),
+          slideBg
         );
 
-        // Clamp to slide boundaries
         let tx = Math.max(0, (tb.x || 0) * SLIDE_W);
         let ty = Math.max(0, (tb.y || 0) * SLIDE_H);
         let tw = Math.max(0.1, (tb.w || 0.1) * SLIDE_W);
@@ -996,11 +1031,8 @@ export default function Editor({ onReset }) {
           wrap: true,
           valign: 'top',
           margin: 0,
-          fill: { color: toHex(bg) },
         });
       }
-
-      // Image regions stay in the background — no cropping needed
     }
 
     const safeName = name.replace(/[^a-z0-9_-]/gi, '_') || 'slideforge';
