@@ -647,6 +647,89 @@ function getTextColor(px, w, h, x1, y1, x2, y2, bg) {
 }
 
 /**
+ * Erase a rectangle from the canvas using gradient inpainting.
+ * Samples colors from 4 edges and fills with a smooth gradient blend,
+ * much better than solid color on gradients/textures.
+ */
+function inpaintRect(ctx, px, w, h, x1, y1, x2, y2) {
+  const rw = x2 - x1, rh = y2 - y1;
+  if (rw <= 0 || rh <= 0) return;
+
+  // Sample median color from each edge (top, bottom, left, right margins)
+  const m = 30; // margin for sampling
+  const sampleEdge = (ax, ay, bx, by) => {
+    const rs = [], gs = [], bs = [];
+    const sx = Math.max(1, Math.floor((bx - ax) / 10));
+    const sy = Math.max(1, Math.floor((by - ay) / 10));
+    for (let y = Math.max(0, ay); y < Math.min(h, by); y += sy) {
+      for (let x = Math.max(0, ax); x < Math.min(w, bx); x += sx) {
+        const i = (y * w + x) * 4;
+        rs.push(px[i]); gs.push(px[i+1]); bs.push(px[i+2]);
+      }
+    }
+    if (!rs.length) return [200, 200, 200];
+    rs.sort((a,b) => a-b); gs.sort((a,b) => a-b); bs.sort((a,b) => a-b);
+    const mid = Math.floor(rs.length / 2);
+    return [rs[mid], gs[mid], bs[mid]];
+  };
+
+  const top = sampleEdge(x1, Math.max(0, y1 - m), x2, Math.max(0, y1 - 2));
+  const bot = sampleEdge(x1, Math.min(h, y2 + 2), x2, Math.min(h, y2 + m));
+  const lft = sampleEdge(Math.max(0, x1 - m), y1, Math.max(0, x1 - 2), y2);
+  const rgt = sampleEdge(Math.min(w, x2 + 2), y1, Math.min(w, x2 + m), y2);
+
+  // Create a temporary canvas for gradient blending
+  const tmp = document.createElement('canvas');
+  tmp.width = rw; tmp.height = rh;
+  const tCtx = tmp.getContext('2d');
+
+  // Vertical gradient (top→bottom)
+  const vGrad = tCtx.createLinearGradient(0, 0, 0, rh);
+  vGrad.addColorStop(0, `rgb(${top[0]},${top[1]},${top[2]})`);
+  vGrad.addColorStop(1, `rgb(${bot[0]},${bot[1]},${bot[2]})`);
+  tCtx.fillStyle = vGrad;
+  tCtx.fillRect(0, 0, rw, rh);
+
+  // Blend horizontal gradient on top at 50% opacity
+  tCtx.globalAlpha = 0.5;
+  const hGrad = tCtx.createLinearGradient(0, 0, rw, 0);
+  hGrad.addColorStop(0, `rgb(${lft[0]},${lft[1]},${lft[2]})`);
+  hGrad.addColorStop(1, `rgb(${rgt[0]},${rgt[1]},${rgt[2]})`);
+  tCtx.fillStyle = hGrad;
+  tCtx.fillRect(0, 0, rw, rh);
+  tCtx.globalAlpha = 1;
+
+  // Draw the blended result onto the main canvas
+  ctx.drawImage(tmp, x1, y1);
+}
+
+/**
+ * Remove text from the slide image using gradient inpainting.
+ * Returns a canvas with text erased but images/graphics preserved.
+ */
+function cleanBackground(srcCanvas, imgData, textBlocks) {
+  const w = srcCanvas.width, h = srcCanvas.height;
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const ctx = out.getContext('2d');
+  ctx.drawImage(srcCanvas, 0, 0);
+
+  for (const b of textBlocks) {
+    const pxL = Math.max(0, Math.round((b.x || 0) * w));
+    const pxT = Math.max(0, Math.round((b.y || 0) * h));
+    const pxR = Math.min(w, Math.round(((b.x || 0) + (b.w || 0)) * w));
+    const pxB = Math.min(h, Math.round(((b.y || 0) + (b.h || 0)) * h));
+    // Padding: enough to cover any AI bounding box inaccuracy
+    const padX = Math.max(8, Math.round((pxR - pxL) * 0.06));
+    const padY = Math.max(6, Math.round((pxB - pxT) * 0.10));
+    inpaintRect(ctx, imgData.data, w, h,
+      Math.max(0, pxL - padX), Math.max(0, pxT - padY),
+      Math.min(w, pxR + padX), Math.min(h, pxB + padY));
+  }
+  return out;
+}
+
+/**
  * Enforce minimum 3:1 contrast ratio (WCAG) between text and background.
  * Falls back to black or white if contrast is too low.
  */
@@ -955,50 +1038,18 @@ export default function Editor({ onReset }) {
       const cw = origCanvas.width, ch = origCanvas.height;
       const imgData = origCanvas.getContext('2d').getImageData(0, 0, cw, ch);
 
-      // 1. Sample overall slide background color (corners)
-      const cornerPixels = [];
-      for (const [sx, sy] of [[5,5],[cw-5,5],[5,ch-5],[cw-5,ch-5]]) {
-        const i = (sy * cw + sx) * 4;
-        cornerPixels.push([imgData.data[i], imgData.data[i+1], imgData.data[i+2]]);
+      // 1. Background = original image with text REMOVED (gradient inpainting)
+      const grabbedText = [...slide.grabbedTextIndices].map(i => det.textBlocks[i]).filter(Boolean);
+      let bgDataUrl;
+      if (grabbedText.length > 0) {
+        const cleaned = cleanBackground(origCanvas, imgData, grabbedText);
+        bgDataUrl = cleaned.toDataURL('image/jpeg', 0.92);
+      } else {
+        bgDataUrl = slide.origDataUrl;
       }
-      const slideBg = cornerPixels.reduce(
-        (acc, p) => [acc[0]+p[0], acc[1]+p[1], acc[2]+p[2]],
-        [0,0,0]
-      ).map(v => Math.round(v / cornerPixels.length));
+      pSlide.addImage({ data: bgDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
 
-      // 2. Set solid background color (no rasterized image = no double text)
-      pSlide.background = { color: toHex(slideBg) };
-
-      // 3. Add cropped image regions from original
-      for (const idx of slide.grabbedImageIndices) {
-        const region = det.imageRegions[idx];
-        if (!region) continue;
-
-        const rx = Math.max(0, Math.round((region.x || 0) * cw));
-        const ry = Math.max(0, Math.round((region.y || 0) * ch));
-        const rw = Math.min(cw - rx, Math.round((region.w || 0) * cw));
-        const rh = Math.min(ch - ry, Math.round((region.h || 0) * ch));
-        if (rw < 4 || rh < 4) continue;
-
-        const crop = document.createElement('canvas');
-        crop.width = rw;
-        crop.height = rh;
-        crop.getContext('2d').drawImage(origCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
-
-        let ix = Math.max(0, (region.x || 0) * SLIDE_W);
-        let iy = Math.max(0, (region.y || 0) * SLIDE_H);
-        let iw = Math.max(0.1, (region.w || 0.1) * SLIDE_W);
-        let ih = Math.max(0.1, (region.h || 0.1) * SLIDE_H);
-        if (ix + iw > SLIDE_W) iw = SLIDE_W - ix;
-        if (iy + ih > SLIDE_H) ih = SLIDE_H - iy;
-
-        pSlide.addImage({
-          data: crop.toDataURL('image/png'),
-          x: ix, y: iy, w: iw, h: ih,
-        });
-      }
-
-      // 4. Add text boxes (editable, no background image underneath)
+      // 2. Editable text boxes on top (transparent — no fill, no double text)
       for (const idx of slide.grabbedTextIndices) {
         const tb = det.textBlocks[idx];
         if (!tb) continue;
@@ -1008,10 +1059,10 @@ export default function Editor({ onReset }) {
         const pxR = Math.min(cw, Math.round(((tb.x || 0) + (tb.w || 0)) * cw));
         const pxB = Math.min(ch, Math.round(((tb.y || 0) + (tb.h || 0)) * ch));
 
-        const localBg = sampleBg(imgData.data, cw, ch, pxL, pxT, pxR, pxB);
+        const bg = sampleBg(imgData.data, cw, ch, pxL, pxT, pxR, pxB);
         const tc = enforceContrast(
-          getTextColor(imgData.data, cw, ch, pxL, pxT, pxR, pxB, localBg),
-          slideBg
+          getTextColor(imgData.data, cw, ch, pxL, pxT, pxR, pxB, bg),
+          bg
         );
 
         let tx = Math.max(0, (tb.x || 0) * SLIDE_W);
