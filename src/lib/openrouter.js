@@ -40,7 +40,8 @@ Each textBlock:
   "h": 0.0-1.0,
   "fontSize": estimated point size (integer, 8-48),
   "bold": true/false,
-  "align": "left" | "center" | "right"
+  "align": "left" | "center" | "right",
+  "color": "#RRGGBB hex color of the text (e.g. #1A2B3C)"
 }
 
 RULES:
@@ -198,6 +199,7 @@ function parseJsonResponse(text) {
         ? Math.round(b.fontSize) : 16,
       bold: !!b.bold,
       align: ['left', 'center', 'right'].includes(b.align) ? b.align : 'left',
+      color: typeof b.color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(b.color) ? b.color : null,
     }));
 
   if (!Array.isArray(parsed.imageRegions)) parsed.imageRegions = [];

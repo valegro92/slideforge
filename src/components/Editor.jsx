@@ -586,128 +586,12 @@ const IconSelectAll = () => (
   </svg>
 );
 
-// ─── Pixel utility functions ──────────────────────────────────────────────────
-
-function sampleBg(px, w, h, x1, y1, x2, y2) {
-  const m = 50;
-  const rs = [], gs = [], bs = [];
-  const pairs = [
-    [x1, Math.max(0, y1 - m), x2, Math.max(0, y1 - 3)],
-    [x1, Math.min(h, y2 + 3), x2, Math.min(h, y2 + m)],
-    [Math.max(0, x1 - m), y1, Math.max(0, x1 - 3), y2],
-    [Math.min(w, x2 + 3), y1, Math.min(w, x2 + m), y2]
-  ];
-  for (const [a, b, c, d] of pairs) {
-    if (c <= a || d <= b) continue;
-    const sx = Math.max(1, Math.floor((c - a) / 12));
-    const sy = Math.max(1, Math.floor((d - b) / 12));
-    for (let y = b; y < d; y += sy) {
-      for (let x = a; x < c; x += sx) {
-        if (x >= 0 && x < w && y >= 0 && y < h) {
-          const i = (y * w + x) * 4;
-          rs.push(px[i]); gs.push(px[i + 1]); bs.push(px[i + 2]);
-        }
-      }
-    }
-  }
-  if (!rs.length) return [240, 240, 240];
-  rs.sort((a, b) => a - b);
-  gs.sort((a, b) => a - b);
-  bs.sort((a, b) => a - b);
-  const mid = Math.floor(rs.length / 2);
-  return [rs[mid], gs[mid], bs[mid]];
-}
-
-function getTextColor(px, w, h, x1, y1, x2, y2, bg) {
-  const pixels = [];
-  const sx = Math.max(1, Math.floor((x2 - x1) / 20));
-  const sy = Math.max(1, Math.floor((y2 - y1) / 20));
-  for (let y = Math.max(0, y1); y < Math.min(h, y2); y += sy) {
-    for (let x = Math.max(0, x1); x < Math.min(w, x2); x += sx) {
-      const i = (y * w + x) * 4;
-      pixels.push([px[i], px[i + 1], px[i + 2]]);
-    }
-  }
-  if (!pixels.length) return [0, 0, 0];
-  const dists = pixels.map(([r, g, b]) =>
-    Math.sqrt((r - bg[0]) ** 2 + (g - bg[1]) ** 2 + (b - bg[2]) ** 2)
-  );
-  const sorted = [...dists].sort((a, b) => a - b);
-  const thr = sorted[Math.floor(sorted.length * 0.8)] || 30;
-  let sR = 0, sG = 0, sB = 0, cnt = 0;
-  for (let i = 0; i < pixels.length; i++) {
-    if (dists[i] > thr) {
-      sR += pixels[i][0];
-      sG += pixels[i][1];
-      sB += pixels[i][2];
-      cnt++;
-    }
-  }
-  return cnt ? [Math.round(sR / cnt), Math.round(sG / cnt), Math.round(sB / cnt)] : [0, 0, 0];
-}
-
 /**
- * Erase a rectangle from the canvas using gradient inpainting.
- * Samples colors from 4 edges and fills with a smooth gradient blend,
- * much better than solid color on gradients/textures.
+ * Remove text from slide by cloning surrounding pixels inward.
+ * For each text block, samples a strip of background pixels from each edge
+ * and stretches/blends them to fill the text area — like content-aware fill.
  */
-function inpaintRect(ctx, px, w, h, x1, y1, x2, y2) {
-  const rw = x2 - x1, rh = y2 - y1;
-  if (rw <= 0 || rh <= 0) return;
-
-  // Sample median color from each edge (top, bottom, left, right margins)
-  const m = 30; // margin for sampling
-  const sampleEdge = (ax, ay, bx, by) => {
-    const rs = [], gs = [], bs = [];
-    const sx = Math.max(1, Math.floor((bx - ax) / 10));
-    const sy = Math.max(1, Math.floor((by - ay) / 10));
-    for (let y = Math.max(0, ay); y < Math.min(h, by); y += sy) {
-      for (let x = Math.max(0, ax); x < Math.min(w, bx); x += sx) {
-        const i = (y * w + x) * 4;
-        rs.push(px[i]); gs.push(px[i+1]); bs.push(px[i+2]);
-      }
-    }
-    if (!rs.length) return [200, 200, 200];
-    rs.sort((a,b) => a-b); gs.sort((a,b) => a-b); bs.sort((a,b) => a-b);
-    const mid = Math.floor(rs.length / 2);
-    return [rs[mid], gs[mid], bs[mid]];
-  };
-
-  const top = sampleEdge(x1, Math.max(0, y1 - m), x2, Math.max(0, y1 - 2));
-  const bot = sampleEdge(x1, Math.min(h, y2 + 2), x2, Math.min(h, y2 + m));
-  const lft = sampleEdge(Math.max(0, x1 - m), y1, Math.max(0, x1 - 2), y2);
-  const rgt = sampleEdge(Math.min(w, x2 + 2), y1, Math.min(w, x2 + m), y2);
-
-  // Create a temporary canvas for gradient blending
-  const tmp = document.createElement('canvas');
-  tmp.width = rw; tmp.height = rh;
-  const tCtx = tmp.getContext('2d');
-
-  // Vertical gradient (top→bottom)
-  const vGrad = tCtx.createLinearGradient(0, 0, 0, rh);
-  vGrad.addColorStop(0, `rgb(${top[0]},${top[1]},${top[2]})`);
-  vGrad.addColorStop(1, `rgb(${bot[0]},${bot[1]},${bot[2]})`);
-  tCtx.fillStyle = vGrad;
-  tCtx.fillRect(0, 0, rw, rh);
-
-  // Blend horizontal gradient on top at 50% opacity
-  tCtx.globalAlpha = 0.5;
-  const hGrad = tCtx.createLinearGradient(0, 0, rw, 0);
-  hGrad.addColorStop(0, `rgb(${lft[0]},${lft[1]},${lft[2]})`);
-  hGrad.addColorStop(1, `rgb(${rgt[0]},${rgt[1]},${rgt[2]})`);
-  tCtx.fillStyle = hGrad;
-  tCtx.fillRect(0, 0, rw, rh);
-  tCtx.globalAlpha = 1;
-
-  // Draw the blended result onto the main canvas
-  ctx.drawImage(tmp, x1, y1);
-}
-
-/**
- * Remove text from the slide image using gradient inpainting.
- * Returns a canvas with text erased but images/graphics preserved.
- */
-function cleanBackground(srcCanvas, imgData, textBlocks) {
+function eraseTextFromImage(srcCanvas, textBlocks) {
   const w = srcCanvas.width, h = srcCanvas.height;
   const out = document.createElement('canvas');
   out.width = w; out.height = h;
@@ -715,38 +599,55 @@ function cleanBackground(srcCanvas, imgData, textBlocks) {
   ctx.drawImage(srcCanvas, 0, 0);
 
   for (const b of textBlocks) {
-    const pxL = Math.max(0, Math.round((b.x || 0) * w));
-    const pxT = Math.max(0, Math.round((b.y || 0) * h));
-    const pxR = Math.min(w, Math.round(((b.x || 0) + (b.w || 0)) * w));
-    const pxB = Math.min(h, Math.round(((b.y || 0) + (b.h || 0)) * h));
-    // Padding: enough to cover any AI bounding box inaccuracy
-    const padX = Math.max(8, Math.round((pxR - pxL) * 0.06));
-    const padY = Math.max(6, Math.round((pxB - pxT) * 0.10));
-    inpaintRect(ctx, imgData.data, w, h,
-      Math.max(0, pxL - padX), Math.max(0, pxT - padY),
-      Math.min(w, pxR + padX), Math.min(h, pxB + padY));
+    const x1 = Math.max(0, Math.round((b.x || 0) * w));
+    const y1 = Math.max(0, Math.round((b.y || 0) * h));
+    const x2 = Math.min(w, Math.round(((b.x || 0) + (b.w || 0)) * w));
+    const y2 = Math.min(h, Math.round(((b.y || 0) + (b.h || 0)) * h));
+    const bw = x2 - x1, bh = y2 - y1;
+    if (bw < 2 || bh < 2) continue;
+
+    // Expand area slightly to cover text edges
+    const pad = 4;
+    const ex1 = Math.max(0, x1 - pad), ey1 = Math.max(0, y1 - pad);
+    const ex2 = Math.min(w, x2 + pad), ey2 = Math.min(h, y2 + pad);
+    const ew = ex2 - ex1, eh = ey2 - ey1;
+
+    // Sample thin strips from each edge (3px deep) outside the text area
+    const stripH = 3; // height of horizontal strip
+    const stripW = 3; // width of vertical strip
+
+    // Top strip: copy the row just above the text area and stretch vertically
+    const topY = Math.max(0, ey1 - stripH);
+    if (topY < ey1) {
+      // Draw the top edge strip, stretched to fill the top half
+      ctx.drawImage(srcCanvas, ex1, topY, ew, stripH, ex1, ey1, ew, Math.ceil(eh / 2));
+    }
+
+    // Bottom strip: stretch to fill bottom half, blended
+    const botY = Math.min(h, ey2);
+    if (botY > ey2 - stripH) {
+      ctx.globalAlpha = 0.7;
+      ctx.drawImage(srcCanvas, ex1, ey2 - 1, ew, Math.min(stripH, h - ey2 + 1), ex1, ey1 + Math.floor(eh / 2), ew, Math.ceil(eh / 2));
+      ctx.globalAlpha = 1;
+    }
+
+    // Left strip blended on top
+    const leftX = Math.max(0, ex1 - stripW);
+    if (leftX < ex1) {
+      ctx.globalAlpha = 0.5;
+      ctx.drawImage(srcCanvas, leftX, ey1, stripW, eh, ex1, ey1, Math.ceil(ew / 2), eh);
+      ctx.globalAlpha = 1;
+    }
+
+    // Right strip blended on top
+    const rightX = Math.min(w, ex2);
+    if (rightX > ex2 - stripW) {
+      ctx.globalAlpha = 0.5;
+      ctx.drawImage(srcCanvas, ex2 - 1, ey1, Math.min(stripW, w - ex2 + 1), eh, ex1 + Math.floor(ew / 2), ey1, Math.ceil(ew / 2), eh);
+      ctx.globalAlpha = 1;
+    }
   }
   return out;
-}
-
-/**
- * Enforce minimum 3:1 contrast ratio (WCAG) between text and background.
- * Falls back to black or white if contrast is too low.
- */
-function enforceContrast(tc, bg) {
-  const lum = ([r, g, b]) => {
-    const [rs, gs, bs] = [r, g, b].map(c => {
-      c /= 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
-  };
-  const ratio = (l1, l2) => (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
-  const bgL = lum(bg), tcL = lum(tc);
-  if (ratio(bgL, tcL) >= 3) return tc;
-  const blackR = ratio(bgL, lum([0, 0, 0]));
-  const whiteR = ratio(bgL, lum([255, 255, 255]));
-  return blackR >= whiteR ? [0, 0, 0] : [255, 255, 255];
 }
 
 // ─── PDF.js loader ────────────────────────────────────────────────────────────
@@ -1026,44 +927,27 @@ export default function Editor({ onReset }) {
     const SLIDE_W = 13.33;
     const SLIDE_H = 7.5;
 
-    const toHex = ([r, g, b]) =>
-      [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
-
     for (const slide of slideSubset) {
       const pSlide = pptx.addSlide();
       const det = slide.detection;
 
-      let origCanvas = slide.origCanvas;
-      if (!origCanvas) origCanvas = await canvasFromDataUrl(slide.origDataUrl);
-      const cw = origCanvas.width, ch = origCanvas.height;
-      const imgData = origCanvas.getContext('2d').getImageData(0, 0, cw, ch);
-
-      // 1. Background = original image with text REMOVED (gradient inpainting)
+      // 1. Background = original with text ERASED (like Canva Grab Text)
       const grabbedText = [...slide.grabbedTextIndices].map(i => det.textBlocks[i]).filter(Boolean);
       let bgDataUrl;
       if (grabbedText.length > 0) {
-        const cleaned = cleanBackground(origCanvas, imgData, grabbedText);
-        bgDataUrl = cleaned.toDataURL('image/jpeg', 0.92);
+        let origCanvas = slide.origCanvas;
+        if (!origCanvas) origCanvas = await canvasFromDataUrl(slide.origDataUrl);
+        const erased = eraseTextFromImage(origCanvas, grabbedText);
+        bgDataUrl = erased.toDataURL('image/jpeg', 0.92);
       } else {
         bgDataUrl = slide.origDataUrl;
       }
       pSlide.addImage({ data: bgDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
 
-      // 2. Editable text boxes on top (transparent — no fill, no double text)
+      // 2. Editable text boxes — AI provides text, position, color
       for (const idx of slide.grabbedTextIndices) {
         const tb = det.textBlocks[idx];
         if (!tb) continue;
-
-        const pxL = Math.max(0, Math.round((tb.x || 0) * cw));
-        const pxT = Math.max(0, Math.round((tb.y || 0) * ch));
-        const pxR = Math.min(cw, Math.round(((tb.x || 0) + (tb.w || 0)) * cw));
-        const pxB = Math.min(ch, Math.round(((tb.y || 0) + (tb.h || 0)) * ch));
-
-        const bg = sampleBg(imgData.data, cw, ch, pxL, pxT, pxR, pxB);
-        const tc = enforceContrast(
-          getTextColor(imgData.data, cw, ch, pxL, pxT, pxR, pxB, bg),
-          bg
-        );
 
         let tx = Math.max(0, (tb.x || 0) * SLIDE_W);
         let ty = Math.max(0, (tb.y || 0) * SLIDE_H);
@@ -1072,10 +956,13 @@ export default function Editor({ onReset }) {
         if (tx + tw > SLIDE_W) tw = SLIDE_W - tx;
         if (ty + th > SLIDE_H) th = SLIDE_H - ty;
 
+        // Use AI-detected color, fallback to dark text
+        const color = (tb.color || '#333333').replace('#', '').toUpperCase();
+
         pSlide.addText(tb.text || '', {
           x: tx, y: ty, w: tw, h: th,
           fontSize: Math.max(8, Math.min(72, tb.fontSize || 18)),
-          color: toHex(tc),
+          color,
           bold: tb.bold === true,
           align: tb.align || 'left',
           fontFace: 'Arial',
