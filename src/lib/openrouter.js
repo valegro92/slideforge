@@ -267,10 +267,9 @@ export async function eraseTextWithAI(apiKey, dataUrl) {
   if (!apiKey) throw new Error('OpenRouter API key not provided');
   if (!dataUrl) throw new Error('Image data URL not provided');
 
-  const INPAINT_PROMPT = `Remove ALL text from this presentation slide image.
-Erase every piece of text (titles, subtitles, body text, bullet points, numbers, labels, captions, footnotes) and reconstruct the background behind it seamlessly.
-Keep all non-text elements intact: photos, icons, charts, diagrams, logos, shapes, lines, decorative elements, background colors and gradients.
-The result should look like the original slide but with no readable text anywhere — only the visual/graphic elements remain.
+  const INPAINT_PROMPT = `Remove ALL text AND all visual elements (charts, graphs, diagrams, icons, logos, infographics, photos) from this presentation slide image.
+Erase everything and reconstruct the background behind it seamlessly — keep only the background color, gradients, and decorative patterns.
+The result should be a clean empty slide background with no text, no images, no charts, no icons — just the underlying background.
 Return ONLY the cleaned image, no text response.`;
 
   let lastError = null;

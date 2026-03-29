@@ -996,6 +996,49 @@ export default function Editor({ onReset }) {
       const bgDataUrl = slide.cleanedDataUrl || slide.origDataUrl;
       pSlide.addImage({ data: bgDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
 
+      // Image regions: crop from ORIGINAL image and add as separate PPTX elements
+      for (const idx of slide.grabbedImageIndices) {
+        const region = det.imageRegions[idx];
+        if (!region) continue;
+
+        // We need a canvas from the ORIGINAL image (not the cleaned one)
+        const origImg = await new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth;
+            c.height = img.naturalHeight;
+            c.getContext('2d').drawImage(img, 0, 0);
+            resolve(c);
+          };
+          img.src = slide.origDataUrl;
+        });
+
+        const cw = origImg.width, ch = origImg.height;
+        const rx = Math.max(0, Math.round((region.x || 0) * cw));
+        const ry = Math.max(0, Math.round((region.y || 0) * ch));
+        const rw = Math.min(cw - rx, Math.round((region.w || 0) * cw));
+        const rh = Math.min(ch - ry, Math.round((region.h || 0) * ch));
+        if (rw < 4 || rh < 4) continue;
+
+        const crop = document.createElement('canvas');
+        crop.width = rw;
+        crop.height = rh;
+        crop.getContext('2d').drawImage(origImg, rx, ry, rw, rh, 0, 0, rw, rh);
+
+        let ix = Math.max(0, (region.x || 0) * SLIDE_W);
+        let iy = Math.max(0, (region.y || 0) * SLIDE_H);
+        let iw = Math.max(0.1, (region.w || 0.1) * SLIDE_W);
+        let ih = Math.max(0.1, (region.h || 0.1) * SLIDE_H);
+        if (ix + iw > SLIDE_W) iw = SLIDE_W - ix;
+        if (iy + ih > SLIDE_H) ih = SLIDE_H - iy;
+
+        pSlide.addImage({
+          data: crop.toDataURL('image/png'),
+          x: ix, y: iy, w: iw, h: ih,
+        });
+      }
+
       // Editable text boxes with user-edited text
       for (const idx of slide.grabbedTextIndices) {
         const tb = det.textBlocks[idx];
@@ -1439,6 +1482,25 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
                   }}
                   onBlur={(e) => onUpdateText(bi, e.target.innerText)}
                   dangerouslySetInnerHTML={{ __html: (slide.editedTexts?.[bi] !== undefined ? slide.editedTexts[bi] : (tb.text || '')).replace(/\n/g, '<br>') }}
+                />
+              )
+            ))}
+            {/* Image regions shown as non-editable visual elements */}
+            {det.imageRegions.map((ir, bi) => (
+              grabbedImageIndices.has(bi) && (
+                <div
+                  key={`ir${bi}`}
+                  style={{
+                    position: 'absolute',
+                    left: `${(ir.x || 0) * 100}%`,
+                    top: `${(ir.y || 0) * 100}%`,
+                    width: `${(ir.w || 0) * 100}%`,
+                    height: `${(ir.h || 0) * 100}%`,
+                    border: '1.5px solid rgba(99,165,212,0.5)',
+                    borderRadius: '3px',
+                    pointerEvents: 'none',
+                    boxSizing: 'border-box',
+                  }}
                 />
               )
             ))}
