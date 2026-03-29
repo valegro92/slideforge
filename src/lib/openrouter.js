@@ -280,7 +280,7 @@ Return ONLY the cleaned image, no text response.`;
       'X-Title': 'SlideForge',
     },
     body: JSON.stringify({
-      model: 'google/gemini-2.5-flash-preview-image',
+      model: 'google/gemini-2.5-flash-image-preview',
       messages: [{
         role: 'user',
         content: [

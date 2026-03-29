@@ -850,9 +850,9 @@ export default function Editor({ onReset }) {
       const pSlide = pptx.addSlide();
       const det = slide.detection;
 
-      // 1. AI erases text from image (Gemini Image diffusion model)
-      let bgDataUrl = slide.origDataUrl;
-      if (slide.grabbedTextIndices.size > 0) {
+      // 1. Use AI to get clean background (text removed by diffusion model)
+      let cleanBgUrl;
+      try {
         const resp = await fetch('/api/inpaint', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -860,12 +860,17 @@ export default function Editor({ onReset }) {
         });
         if (resp.ok) {
           const data = await resp.json();
-          if (data.cleanedImage) bgDataUrl = data.cleanedImage;
+          if (data.cleanedImage) cleanBgUrl = data.cleanedImage;
         }
-      }
-      pSlide.addImage({ data: bgDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
+      } catch { /* fall through */ }
 
-      // 2. Editable text boxes — AI provides text, position, color
+      // 2. Background: AI-cleaned image (no text) or original as fallback
+      pSlide.addImage({
+        data: cleanBgUrl || slide.origDataUrl,
+        x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
+      });
+
+      // 3. Editable text boxes replace the erased text
       for (const idx of slide.grabbedTextIndices) {
         const tb = det.textBlocks[idx];
         if (!tb) continue;
@@ -877,7 +882,6 @@ export default function Editor({ onReset }) {
         if (tx + tw > SLIDE_W) tw = SLIDE_W - tx;
         if (ty + th > SLIDE_H) th = SLIDE_H - ty;
 
-        // Use AI-detected color, fallback to dark text
         const color = (tb.color || '#333333').replace('#', '').toUpperCase();
 
         pSlide.addText(tb.text || '', {
