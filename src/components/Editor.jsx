@@ -213,6 +213,7 @@ const STYLES = `
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0,0,0,0.45);
     background: #000;
+    container-type: inline-size;
   }
 
   .slide-bg-img {
@@ -1477,7 +1478,7 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
                     width: `${(tb.w || 0) * 100}%`,
                     minHeight: `${(tb.h || 0) * 100}%`,
                     color: tb.color || '#333333',
-                    fontSize: `${Math.max(8, Math.min(48, (tb.fontSize || 16) * 0.55))}px`,
+                    fontSize: `${((tb.fontSize || 16) * 0.104).toFixed(2)}cqi`,
                     fontWeight: tb.bold ? '700' : '400',
                     textAlign: tb.align || 'left',
                     fontFamily: tb.fontFamily || 'Arial, sans-serif',
