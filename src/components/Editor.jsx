@@ -587,9 +587,10 @@ const IconSelectAll = () => (
 );
 
 /**
- * Remove text from slide by cloning surrounding pixels inward.
- * For each text block, samples a strip of background pixels from each edge
- * and stretches/blends them to fill the text area — like content-aware fill.
+ * Erase text from slide by bilinear interpolation from edge pixels.
+ * Samples border pixels around each text block, then fills interior
+ * with weighted blend from all 4 edges. Mathematically exact for
+ * solid colors and linear gradients (typical NotebookLM slides).
  */
 function eraseTextFromImage(srcCanvas, textBlocks) {
   const w = srcCanvas.width, h = srcCanvas.height;
@@ -598,54 +599,60 @@ function eraseTextFromImage(srcCanvas, textBlocks) {
   const ctx = out.getContext('2d');
   ctx.drawImage(srcCanvas, 0, 0);
 
+  const PAD = 6; // sample margin outside text box
+
   for (const b of textBlocks) {
-    const x1 = Math.max(0, Math.round((b.x || 0) * w));
-    const y1 = Math.max(0, Math.round((b.y || 0) * h));
-    const x2 = Math.min(w, Math.round(((b.x || 0) + (b.w || 0)) * w));
-    const y2 = Math.min(h, Math.round(((b.y || 0) + (b.h || 0)) * h));
-    const bw = x2 - x1, bh = y2 - y1;
+    const bx = Math.max(0, Math.round((b.x || 0) * w));
+    const by = Math.max(0, Math.round((b.y || 0) * h));
+    const bw = Math.min(w, Math.round(((b.x || 0) + (b.w || 0)) * w)) - bx;
+    const bh = Math.min(h, Math.round(((b.y || 0) + (b.h || 0)) * h)) - by;
     if (bw < 2 || bh < 2) continue;
 
-    // Expand area slightly to cover text edges
-    const pad = 4;
-    const ex1 = Math.max(0, x1 - pad), ey1 = Math.max(0, y1 - pad);
-    const ex2 = Math.min(w, x2 + pad), ey2 = Math.min(h, y2 + pad);
-    const ew = ex2 - ex1, eh = ey2 - ey1;
+    // Expanded region with padding
+    const rx = Math.max(0, bx - PAD);
+    const ry = Math.max(0, by - PAD);
+    const rw = Math.min(w - rx, bw + PAD * 2);
+    const rh = Math.min(h - ry, bh + PAD * 2);
 
-    // Sample thin strips from each edge (3px deep) outside the text area
-    const stripH = 3; // height of horizontal strip
-    const stripW = 3; // width of vertical strip
+    const region = ctx.getImageData(rx, ry, rw, rh);
+    const d = region.data;
 
-    // Top strip: copy the row just above the text area and stretch vertically
-    const topY = Math.max(0, ey1 - stripH);
-    if (topY < ey1) {
-      // Draw the top edge strip, stretched to fill the top half
-      ctx.drawImage(srcCanvas, ex1, topY, ew, stripH, ex1, ey1, ew, Math.ceil(eh / 2));
+    // Sample edge colors per row/col
+    const px = (r, c) => {
+      const i = (r * rw + c) * 4;
+      return [d[i], d[i+1], d[i+2]];
+    };
+
+    const leftCol = [], rightCol = [], topRow = [], botRow = [];
+    for (let r = 0; r < rh; r++) {
+      leftCol.push(px(r, 0));
+      rightCol.push(px(r, rw - 1));
+    }
+    for (let c = 0; c < rw; c++) {
+      topRow.push(px(0, c));
+      botRow.push(px(rh - 1, c));
     }
 
-    // Bottom strip: stretch to fill bottom half, blended
-    const botY = Math.min(h, ey2);
-    if (botY > ey2 - stripH) {
-      ctx.globalAlpha = 0.7;
-      ctx.drawImage(srcCanvas, ex1, ey2 - 1, ew, Math.min(stripH, h - ey2 + 1), ex1, ey1 + Math.floor(eh / 2), ew, Math.ceil(eh / 2));
-      ctx.globalAlpha = 1;
+    // Fill interior with inverse-distance weighted blend from 4 edges
+    for (let r = PAD; r < rh - PAD; r++) {
+      for (let c = PAD; c < rw - PAD; c++) {
+        const wl = 1 / Math.max(c, 0.5);
+        const wr = 1 / Math.max(rw - 1 - c, 0.5);
+        const wt = 1 / Math.max(r, 0.5);
+        const wb = 1 / Math.max(rh - 1 - r, 0.5);
+        const ws = wl + wr + wt + wb;
+
+        const i = (r * rw + c) * 4;
+        for (let ch = 0; ch < 3; ch++) {
+          d[i + ch] = Math.round(
+            (wl * leftCol[r][ch] + wr * rightCol[r][ch] +
+             wt * topRow[c][ch] + wb * botRow[c][ch]) / ws
+          );
+        }
+      }
     }
 
-    // Left strip blended on top
-    const leftX = Math.max(0, ex1 - stripW);
-    if (leftX < ex1) {
-      ctx.globalAlpha = 0.5;
-      ctx.drawImage(srcCanvas, leftX, ey1, stripW, eh, ex1, ey1, Math.ceil(ew / 2), eh);
-      ctx.globalAlpha = 1;
-    }
-
-    // Right strip blended on top
-    const rightX = Math.min(w, ex2);
-    if (rightX > ex2 - stripW) {
-      ctx.globalAlpha = 0.5;
-      ctx.drawImage(srcCanvas, ex2 - 1, ey1, Math.min(stripW, w - ex2 + 1), eh, ex1 + Math.floor(ew / 2), ey1, Math.ceil(ew / 2), eh);
-      ctx.globalAlpha = 1;
-    }
+    ctx.putImageData(region, rx, ry);
   }
   return out;
 }
