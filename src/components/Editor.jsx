@@ -586,77 +586,6 @@ const IconSelectAll = () => (
   </svg>
 );
 
-/**
- * Erase text from slide by bilinear interpolation from edge pixels.
- * Samples border pixels around each text block, then fills interior
- * with weighted blend from all 4 edges. Mathematically exact for
- * solid colors and linear gradients (typical NotebookLM slides).
- */
-function eraseTextFromImage(srcCanvas, textBlocks) {
-  const w = srcCanvas.width, h = srcCanvas.height;
-  const out = document.createElement('canvas');
-  out.width = w; out.height = h;
-  const ctx = out.getContext('2d');
-  ctx.drawImage(srcCanvas, 0, 0);
-
-  const PAD = 6; // sample margin outside text box
-
-  for (const b of textBlocks) {
-    const bx = Math.max(0, Math.round((b.x || 0) * w));
-    const by = Math.max(0, Math.round((b.y || 0) * h));
-    const bw = Math.min(w, Math.round(((b.x || 0) + (b.w || 0)) * w)) - bx;
-    const bh = Math.min(h, Math.round(((b.y || 0) + (b.h || 0)) * h)) - by;
-    if (bw < 2 || bh < 2) continue;
-
-    // Expanded region with padding
-    const rx = Math.max(0, bx - PAD);
-    const ry = Math.max(0, by - PAD);
-    const rw = Math.min(w - rx, bw + PAD * 2);
-    const rh = Math.min(h - ry, bh + PAD * 2);
-
-    const region = ctx.getImageData(rx, ry, rw, rh);
-    const d = region.data;
-
-    // Sample edge colors per row/col
-    const px = (r, c) => {
-      const i = (r * rw + c) * 4;
-      return [d[i], d[i+1], d[i+2]];
-    };
-
-    const leftCol = [], rightCol = [], topRow = [], botRow = [];
-    for (let r = 0; r < rh; r++) {
-      leftCol.push(px(r, 0));
-      rightCol.push(px(r, rw - 1));
-    }
-    for (let c = 0; c < rw; c++) {
-      topRow.push(px(0, c));
-      botRow.push(px(rh - 1, c));
-    }
-
-    // Fill interior with inverse-distance weighted blend from 4 edges
-    for (let r = PAD; r < rh - PAD; r++) {
-      for (let c = PAD; c < rw - PAD; c++) {
-        const wl = 1 / Math.max(c, 0.5);
-        const wr = 1 / Math.max(rw - 1 - c, 0.5);
-        const wt = 1 / Math.max(r, 0.5);
-        const wb = 1 / Math.max(rh - 1 - r, 0.5);
-        const ws = wl + wr + wt + wb;
-
-        const i = (r * rw + c) * 4;
-        for (let ch = 0; ch < 3; ch++) {
-          d[i + ch] = Math.round(
-            (wl * leftCol[r][ch] + wr * rightCol[r][ch] +
-             wt * topRow[c][ch] + wb * botRow[c][ch]) / ws
-          );
-        }
-      }
-    }
-
-    ctx.putImageData(region, rx, ry);
-  }
-  return out;
-}
-
 // ─── PDF.js loader ────────────────────────────────────────────────────────────
 
 let pdfJsPromise = null;
@@ -704,28 +633,11 @@ function loadPptxGen() {
   return pptxPromise;
 }
 
-// ─── Helper: dataUrl from canvas ─────────────────────────────────────────────
-
-function canvasFromDataUrl(dataUrl) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth;
-      c.height = img.naturalHeight;
-      c.getContext('2d').drawImage(img, 0, 0);
-      resolve(c);
-    };
-    img.src = dataUrl;
-  });
-}
-
 // ─── createSlideState helper ─────────────────────────────────────────────────
 
 function createSlideState(origDataUrl, width, height) {
   return {
     origDataUrl,
-    origCanvas: null,
     width,
     height,
     mode: 'pristine', // 'pristine' | 'detected' | 'selecting'
@@ -938,34 +850,17 @@ export default function Editor({ onReset }) {
       const pSlide = pptx.addSlide();
       const det = slide.detection;
 
-      // 1. Background = original with text ERASED by AI (Gemini Image inpainting)
+      // 1. AI erases text from image (Gemini Image diffusion model)
       let bgDataUrl = slide.origDataUrl;
       if (slide.grabbedTextIndices.size > 0) {
-        try {
-          const resp = await fetch('/api/inpaint', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: slide.origDataUrl }),
-          });
-          if (resp.ok) {
-            const data = await resp.json();
-            if (data.cleanedImage) bgDataUrl = data.cleanedImage;
-          } else {
-            // Fallback: bilinear interpolation if AI inpainting fails
-            console.warn('AI inpainting failed, using bilinear fallback');
-            let origCanvas = slide.origCanvas;
-            if (!origCanvas) origCanvas = await canvasFromDataUrl(slide.origDataUrl);
-            const grabbedText = [...slide.grabbedTextIndices].map(i => det.textBlocks[i]).filter(Boolean);
-            const erased = eraseTextFromImage(origCanvas, grabbedText);
-            bgDataUrl = erased.toDataURL('image/jpeg', 0.92);
-          }
-        } catch (err) {
-          console.warn('AI inpainting error, using bilinear fallback:', err.message);
-          let origCanvas = slide.origCanvas;
-          if (!origCanvas) origCanvas = await canvasFromDataUrl(slide.origDataUrl);
-          const grabbedText = [...slide.grabbedTextIndices].map(i => det.textBlocks[i]).filter(Boolean);
-          const erased = eraseTextFromImage(origCanvas, grabbedText);
-          bgDataUrl = erased.toDataURL('image/jpeg', 0.92);
+        const resp = await fetch('/api/inpaint', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: slide.origDataUrl }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.cleanedImage) bgDataUrl = data.cleanedImage;
         }
       }
       pSlide.addImage({ data: bgDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
