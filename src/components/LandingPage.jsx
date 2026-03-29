@@ -224,7 +224,7 @@ const LandingPage = () => {
                 e.target.style.transform = 'scale(1)';
               }}
             >
-              Prova gratis
+              Carica il tuo PDF
             </Link>
           </div>
         </div>
@@ -511,8 +511,8 @@ const LandingPage = () => {
                 : 'none',
             }}
           >
-            Da PDF rasterizzato a PPTX editabile in{' '}
-            <span style={{ color: theme.teal }}>30 secondi</span>
+            Le tue slide NotebookLM,{' '}
+            <span style={{ color: theme.teal }}>finalmente editabili</span>
           </h1>
 
           {/* Subheadline */}
@@ -531,8 +531,8 @@ const LandingPage = () => {
                 : 'none',
             }}
           >
-            Hai un PDF da NotebookLM, Canva o Google Slides? L'AI Vision decompone ogni slide in
-            testo, immagini e forme. Tu modifichi tutto nell'editor e esporti in PPTX.
+            Carica il PDF esportato da NotebookLM e ottieni un PPTX con testo, immagini
+            e layout editabili. In 30 secondi, senza rifare nulla da zero.
           </p>
 
           {/* CTA Buttons */}
@@ -575,7 +575,7 @@ const LandingPage = () => {
                 e.target.style.transform = 'translateY(0)';
               }}
             >
-              Prova gratis
+              Carica il tuo PDF
             </Link>
             <button
               onClick={() => scrollToSection('how-it-works')}
@@ -661,8 +661,8 @@ const LandingPage = () => {
                   fontFamily: 'DM Sans, sans-serif',
                 }}
               >
-                NotebookLM, Canva, Google Slides e molti altri tool esportano PDF con slide 100%
-                immagine. Zero testo estraibile. Impossibile modificarle senza rifare tutto da zero.
+                NotebookLM genera slide bellissime, ma sono PDF rasterizzati. Ogni slide è un'immagine
+                piatta — zero testo estraibile, impossibile da modificare senza rifare tutto da zero.
               </p>
             </article>
 
@@ -701,8 +701,8 @@ const LandingPage = () => {
                   fontFamily: 'DM Sans, sans-serif',
                 }}
               >
-                SlideForge usa AI Vision per riconoscere testo, immagini e forme — e li
-                ricostruisce come elementi editabili.
+                SlideForge usa AI Vision per riconoscere testo, immagini e layout dalle tue slide
+                NotebookLM. Li ricostruisce come elementi editabili in un PPTX perfetto.
               </p>
             </article>
           </div>
@@ -755,20 +755,20 @@ const LandingPage = () => {
             {[
               {
                 number: '1',
-                title: 'Carica il PDF',
-                description: 'Drag & drop o seleziona dalla libreria locale',
+                title: 'Carica il PDF da NotebookLM',
+                description: 'Seleziona il PDF esportato dalle tue slide',
               },
               {
                 number: '2',
-                title: "L'AI analizza",
+                title: "L'AI riconosce testo e immagini",
                 description:
-                  'Estrae testo, immagini, forme da ogni slide',
+                  'AI Vision estrae ogni elemento dalla slide rasterizzata',
               },
               {
                 number: '3',
-                title: 'Modifica e esporta',
+                title: 'Scarica il PPTX editabile',
                 description:
-                  'Editor visuale, poi PPTX editabile con un click',
+                  'Modifica il testo nell\'editor e esporta in PowerPoint',
               },
             ].map((step, idx) => (
               <article
@@ -1054,7 +1054,7 @@ const LandingPage = () => {
                   'OCR offline',
                   'Export con watermark',
                 ],
-                cta: 'Prova gratis',
+                cta: 'Carica il tuo PDF',
                 highlighted: false,
               },
               {

@@ -149,24 +149,24 @@ const STYLES = `
     line-height: 1.25;
     font-family: 'DM Sans', system-ui, sans-serif;
     border-radius: 2px;
+    background: transparent;
+    transition: background 0.15s, outline 0.15s, box-shadow 0.15s;
   }
 
   .text-block:hover {
-    outline: 2px dashed var(--accent);
+    background: rgba(45, 212, 168, 0.08);
+    outline: 1.5px dashed rgba(45, 212, 168, 0.5);
     outline-offset: -1px;
     z-index: 5;
   }
 
   .text-block:focus {
+    background: rgba(255, 255, 255, 0.88);
     outline: 2px solid var(--accent);
     outline-offset: -1px;
-    box-shadow: 0 0 16px rgba(45, 212, 168, 0.4);
+    box-shadow: 0 0 12px rgba(45, 212, 168, 0.3);
     z-index: 10;
     overflow: visible;
-  }
-
-  .text-block[data-over-image="1"]:focus {
-    background-color: rgba(255, 255, 255, 0.92) !important;
   }
 
   .text-block-draggable {
@@ -455,7 +455,8 @@ export default function Editor() {
 
   // Pixel color sampling functions (preserved exactly)
   const sampleBg = useCallback((px, w, h, x1, y1, x2, y2) => {
-    const m = 30, pixels = [];
+    const m = 50;
+    const rs = [], gs = [], bs = [];
     const pairs = [
       [x1, Math.max(0, y1 - m), x2, Math.max(0, y1 - 3)],
       [x1, Math.min(h, y2 + 3), x2, Math.min(h, y2 + m)],
@@ -464,31 +465,23 @@ export default function Editor() {
     ];
     for (const [a, b, c, d] of pairs) {
       if (c <= a || d <= b) continue;
-      const sx = Math.max(1, Math.floor((c - a) / 15));
-      const sy = Math.max(1, Math.floor((d - b) / 15));
+      const sx = Math.max(1, Math.floor((c - a) / 12));
+      const sy = Math.max(1, Math.floor((d - b) / 12));
       for (let y = b; y < d; y += sy) {
         for (let x = a; x < c; x += sx) {
           if (x >= 0 && x < w && y >= 0 && y < h) {
             const i = (y * w + x) * 4;
-            pixels.push([px[i], px[i + 1], px[i + 2]]);
+            rs.push(px[i]); gs.push(px[i + 1]); bs.push(px[i + 2]);
           }
         }
       }
     }
-    if (!pixels.length) return [230, 230, 230];
-    const counts = {};
-    for (const [r, g, b] of pixels) {
-      const k = `${(r >> 4) << 4},${(g >> 4) << 4},${(b >> 4) << 4}`;
-      counts[k] = (counts[k] || 0) + 1;
-    }
-    let best = null, bestC = 0;
-    for (const k in counts) {
-      if (counts[k] > bestC) {
-        bestC = counts[k];
-        best = k;
-      }
-    }
-    return best ? best.split(',').map(Number) : [230, 230, 230];
+    if (!rs.length) return [240, 240, 240];
+    rs.sort((a, b) => a - b);
+    gs.sort((a, b) => a - b);
+    bs.sort((a, b) => a - b);
+    const mid = Math.floor(rs.length / 2);
+    return [rs[mid], gs[mid], bs[mid]];
   }, []);
 
   const sampleShapeFill = useCallback((px, w, h, x1, y1, x2, y2) => {
@@ -604,8 +597,8 @@ export default function Editor() {
 
     for (const b of textBlocks) {
       if (b.overImage) continue;
-      const padX = Math.max(25, Math.round((b.pxRight - b.pxLeft) * 0.08));
-      const padY = Math.max(20, Math.round((b.pxBottom - b.pxTop) * 0.15));
+      const padX = Math.max(10, Math.round((b.pxRight - b.pxLeft) * 0.04));
+      const padY = Math.max(8, Math.round((b.pxBottom - b.pxTop) * 0.08));
       const x1 = Math.max(0, b.pxLeft - padX);
       const y1 = Math.max(0, b.pxTop - padY);
       const x2 = Math.min(w, b.pxRight + padX);
@@ -990,6 +983,30 @@ export default function Editor() {
     };
 
     const handlePointerUp = () => {
+      const vpEl = viewportRef.current;
+      if (vpEl) {
+        const idx = dragInfo?.blockIdx ?? resizeInfo?.blockIdx;
+        if (idx != null) {
+          const el = vpEl.querySelector(`[data-block-idx="${idx}"]`);
+          if (el) {
+            const vpW = vpEl.offsetWidth;
+            const vpH = vpEl.offsetHeight;
+            const newX = el.offsetLeft / vpW;
+            const newY = el.offsetTop / vpH;
+            const newW = el.offsetWidth / vpW;
+            const newH = el.offsetHeight / vpH;
+            setAllSlides(prev => {
+              const next = [...prev];
+              const slide = { ...next[currentSlideIdx] };
+              const blocks = [...slide.blocks];
+              blocks[idx] = { ...blocks[idx], x: newX, y: newY, w: newW, h: newH };
+              slide.blocks = blocks;
+              next[currentSlideIdx] = slide;
+              return next;
+            });
+          }
+        }
+      }
       setDragInfo(null);
       setResizeInfo(null);
     };
@@ -1000,7 +1017,7 @@ export default function Editor() {
       document.removeEventListener('pointermove', handlePointerMove);
       document.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [dragInfo, resizeInfo]);
+  }, [dragInfo, resizeInfo, currentSlideIdx]);
 
   const handleExport = useCallback(async () => {
     if (typeof window.PptxGenJS === 'undefined') {
@@ -1149,7 +1166,7 @@ export default function Editor() {
         <div className="editor-content">
           <div className="slide-viewport" ref={viewportRef}>
             <div className="slide-layer" style={{ zIndex: 1 }}>
-              <img className="slide-bg" src={slide.cleanedDataUrl} alt="slide" />
+              <img className="slide-bg" src={slide.origDataUrl} alt="slide" />
             </div>
 
             <div className="slide-layer" style={{ zIndex: 2 }} id="shapesLayer">
@@ -1198,7 +1215,7 @@ export default function Editor() {
                       height: b.h * 100 + '%',
                       fontSize: fsPx + 'px',
                       color: '#' + (b.pixelColor || '000000'),
-                      backgroundColor: b.overImage ? 'transparent' : (b.bgColor || '#FFFFFF'),
+                      backgroundColor: 'transparent',
                       fontWeight: (b.aiBold || (fsPx >= 20 && nLines <= 3)) ? 'bold' : 'normal'
                     }}
                   >
@@ -1223,7 +1240,7 @@ export default function Editor() {
                 className={`thumbnail ${idx === currentSlideIdx ? 'active' : ''}`}
                 onClick={() => setCurrentSlideIdx(idx)}
               >
-                <img src={s.cleanedDataUrl} alt={`Slide ${idx + 1}`} />
+                <img src={s.origDataUrl} alt={`Slide ${idx + 1}`} />
               </div>
             ))}
           </div>
