@@ -1166,7 +1166,7 @@ export default function Editor() {
         <div className="editor-content">
           <div className="slide-viewport" ref={viewportRef}>
             <div className="slide-layer" style={{ zIndex: 1 }}>
-              <img className="slide-bg" src={slide.origDataUrl} alt="slide" />
+              <img className="slide-bg" src={slide.cleanedDataUrl} alt="slide" />
             </div>
 
             <div className="slide-layer" style={{ zIndex: 2 }} id="shapesLayer">
@@ -1240,7 +1240,7 @@ export default function Editor() {
                 className={`thumbnail ${idx === currentSlideIdx ? 'active' : ''}`}
                 onClick={() => setCurrentSlideIdx(idx)}
               >
-                <img src={s.origDataUrl} alt={`Slide ${idx + 1}`} />
+                <img src={s.cleanedDataUrl} alt={`Slide ${idx + 1}`} />
               </div>
             ))}
           </div>
