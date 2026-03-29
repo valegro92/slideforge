@@ -1,85 +1,84 @@
 /**
- * Server-side OpenRouter client with retry logic
- * Handles API calls to OpenRouter for AI Vision analysis
+ * OpenRouter client for SlideForge — "Grab Text" approach
+ *
+ * Sends a slide image to an AI Vision model and gets back the text blocks
+ * with their positions. No shapes, no image regions — just text extraction,
+ * like Canva's "Image to Text" feature.
  */
 
-const SLIDE_PROMPT = `You are converting a rasterized presentation slide into separate editable elements for PowerPoint.
+const SLIDE_PROMPT = `You are a precision OCR engine for presentation slides. Your ONLY task: find every piece of readable text in this slide image and return its exact position and content.
 
-Your job: decompose this slide image into 3 types of elements.
+COORDINATE SYSTEM — all values are fractions of image dimensions (0.0 to 1.0):
+- "x": left edge ÷ image width
+- "y": top edge ÷ image height
+- "w": text width ÷ image width
+- "h": text height ÷ image height
 
-Return a JSON object with THREE arrays:
+Return a JSON object with TWO arrays: "textBlocks" and "imageRegions".
 
-1. "textBlocks": ONLY text that sits on solid-color backgrounds (titles, body text, bullet points, captions, footnotes).
-   For each:
-   - "text": exact text content (preserve line breaks as \\n)
-   - "x": left position as fraction of image width (0.0 to 1.0)
-   - "y": top position as fraction of image height (0.0 to 1.0)
-   - "w": width as fraction
-   - "h": height as fraction
-   - "fontSize": estimated font size in points (8-48)
-   - "bold": true if text appears bold
+Each imageRegion (photos, charts, diagrams, logos, icons, infographics — any visual that is NOT plain text):
+{
+  "x": 0.0-1.0,
+  "y": 0.0-1.0,
+  "w": 0.0-1.0,
+  "h": 0.0-1.0,
+  "type": "photo" | "chart" | "diagram" | "icon" | "logo" | "infographic"
+}
 
-   CRITICAL: Do NOT include text that is part of an image, chart, map, diagram, logo, or infographic.
-   Examples of text to EXCLUDE from textBlocks:
-   - City names on a map (Foggia, Bari, Lecce, etc.)
-   - Numbers/percentages on a pie chart or bar chart
-   - Labels inside diagrams or flowcharts
-   - Text inside logos or icons
-   This text belongs to the image and will be captured as part of the imageRegion.
+RULES for imageRegions:
+- Include the FULL bounding box including legends, axes, labels that are part of the image.
+- Each distinct visual gets its own region.
+- Do NOT include text-only areas as images.
+- For background images spanning the full slide, include as one region covering the full area.
 
-2. "shapeBlocks": colored rectangles, bars, banners, containers — solid-color geometric areas.
-   For each:
-   - "x", "y", "w", "h": position as fractions
-   - "roundedCorners": true if rounded
-   - "description": brief label
+Each textBlock:
+{
+  "text": "exact verbatim text (preserve line breaks as \\n)",
+  "x": 0.0-1.0,
+  "y": 0.0-1.0,
+  "w": 0.0-1.0,
+  "h": 0.0-1.0,
+  "fontSize": estimated point size (integer, 8-48),
+  "bold": true/false,
+  "align": "left" | "center" | "right"
+}
 
-3. "imageRegions": photos, charts, maps, logos, icons, diagrams, infographics — any visual element that is NOT plain text on a solid background.
-   For each:
-   - "x", "y", "w", "h": position as fractions
-   IMPORTANT: Include the FULL bounding box of each image/chart/map, including any labels or legends that are part of it.
-
-Rules:
-- Be PRECISE with positions — bounding boxes must tightly fit each element
-- Group related lines into one textBlock (e.g., a title with subtitle = one block)
-- Do NOT include the main slide background as a shape
-- Do NOT include watermarks or "NotebookLM" text
-- Do NOT include a "color" field — colors are computed from pixels
-
-Return ONLY valid JSON, no markdown, no explanation.`;
+RULES:
+1. Extract ALL readable text: titles, subtitles, body text, bullet points, captions, footnotes, labels, numbers, dates.
+2. Create SEPARATE textBlocks for each visually distinct text group:
+   - Slide title = one block
+   - Subtitle = separate block
+   - Each bullet group = one block (bullets joined with \\n)
+   - Caption/footnote = separate block
+   - Text in a colored bar/banner = separate block
+3. INCLUDE text that overlays colored shapes, banners, or images — it's still editable text.
+4. EXCLUDE text that is PART of a chart axis, diagram label, infographic number, map label, or logo. These are baked into the image.
+5. EXCLUDE watermarks, "NotebookLM", "Google" branding.
+6. Bounding boxes must be TIGHT — wrap the text closely, no excess padding.
+7. fontSize hints: slide titles ~32-40pt, body/bullets ~16-20pt, captions ~10-14pt.
+8. Return ONLY the JSON object. No markdown fences, no explanation.`;
 
 const MAX_RETRIES = 3;
-const INITIAL_DELAY = 1000; // ms
-const MAX_DELAY = 20000; // ms
+const INITIAL_DELAY = 1000;
+const MAX_DELAY = 20000;
 
 /**
- * Call OpenRouter API with exponential backoff retry logic
- * @param {string} apiKey - OpenRouter API key
- * @param {string} model - Model identifier
- * @param {string} dataUrl - Base64 data URL of the image
- * @returns {Promise<object>} Parsed JSON response with textBlocks, shapeBlocks, imageRegions
- * @throws {Error} If all retries fail
+ * Call OpenRouter API with retry logic
+ * @param {string} apiKey
+ * @param {string} model
+ * @param {string} dataUrl - base64 image data URL
+ * @returns {Promise<{textBlocks: Array}>}
  */
 export async function callOpenRouter(apiKey, model, dataUrl) {
-  if (!apiKey) {
-    throw new Error('OpenRouter API key not provided');
-  }
-  if (!model) {
-    throw new Error('Model not specified');
-  }
-  if (!dataUrl) {
-    throw new Error('Image data URL not provided');
-  }
+  if (!apiKey) throw new Error('OpenRouter API key not provided');
+  if (!model) throw new Error('Model not specified');
+  if (!dataUrl) throw new Error('Image data URL not provided');
 
   let lastError = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    // Exponential backoff delay before retry (except first attempt)
     if (attempt > 0) {
-      const delay = Math.min(
-        INITIAL_DELAY * Math.pow(2, attempt - 1),
-        MAX_DELAY
-      );
-      console.log(`Retry ${attempt}/${MAX_RETRIES} after ${delay}ms...`);
+      const delay = Math.min(INITIAL_DELAY * Math.pow(2, attempt - 1), MAX_DELAY);
       await new Promise(r => setTimeout(r, delay));
     }
 
@@ -101,143 +100,152 @@ export async function callOpenRouter(apiKey, model, dataUrl) {
               { type: 'image_url', image_url: { url: dataUrl } }
             ]
           }],
-          temperature: 0.1,
+          temperature: 0.05,
           max_tokens: 4096,
         })
       });
 
-      // Handle rate limiting and service unavailable
       if (response.status === 429 || response.status === 503) {
-        const retryAfter = response.headers.get('retry-after');
-        lastError = new Error(
-          `Rate limited (${response.status})${retryAfter ? ` - retry after ${retryAfter}s` : ''}`
-        );
-        console.warn(lastError.message);
-        continue; // retry
+        lastError = new Error(`Rate limited (${response.status})`);
+        continue;
       }
 
-      // Handle other HTTP errors
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `OpenRouter API error (${response.status}): ${errorText.substring(0, 200)}`
-        );
+        throw new Error(`OpenRouter API error (${response.status}): ${errorText.substring(0, 200)}`);
       }
 
-      // Parse response
       const data = await response.json();
       const responseText = data.choices?.[0]?.message?.content;
+      if (!responseText) throw new Error('OpenRouter returned empty response');
 
-      if (!responseText) {
-        throw new Error('OpenRouter returned empty response');
-      }
-
-      // Parse JSON from response with robust extraction
-      const parsed = parseJsonResponse(responseText);
-      return parsed;
+      return parseJsonResponse(responseText);
 
     } catch (error) {
       lastError = error;
-      console.error(`Attempt ${attempt + 1}/${MAX_RETRIES} failed:`, error.message);
-
-      // Don't retry on last attempt
       if (attempt === MAX_RETRIES - 1) {
-        throw new Error(
-          `Failed after ${MAX_RETRIES} attempts: ${lastError.message}`
-        );
+        throw new Error(`Failed after ${MAX_RETRIES} attempts: ${lastError.message}`);
       }
     }
   }
 
-  // Should not reach here, but just in case
   throw lastError || new Error('OpenRouter call failed');
 }
 
 /**
- * Robustly parse JSON from API response
- * Handles markdown blocks, extra text, malformed JSON
- * @param {string} text - Response text from API
- * @returns {object} Parsed JSON with textBlocks, shapeBlocks, imageRegions
+ * Parse JSON from AI response — handles markdown fences, truncation, etc.
+ * @param {string} text
+ * @returns {{textBlocks: Array}}
  */
 function parseJsonResponse(text) {
-  if (!text) {
-    return { textBlocks: [], shapeBlocks: [], imageRegions: [] };
-  }
+  const EMPTY = { textBlocks: [] };
+  if (!text || typeof text !== 'string') return EMPTY;
 
-  // Remove markdown code blocks
+  // Strip markdown fences
   let cleaned = text
-    .replace(/```json\n?/g, '')
-    .replace(/```\n?/g, '')
+    .replace(/^[\s\S]*?```(?:json)?\s*\n?/i, '')
+    .replace(/\n?\s*```[\s\S]*$/i, '')
     .trim();
 
-  // Extract JSON object if there's extra text
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    cleaned = jsonMatch[0];
+  if (cleaned === text.trim()) cleaned = text.trim();
+
+  // Extract outermost JSON object
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
   }
 
+  // Fix common issues
+  cleaned = cleaned
+    .replace(/,\s*([}\]])/g, '$1')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+
+  let parsed;
   try {
-    const parsed = JSON.parse(cleaned);
+    parsed = JSON.parse(cleaned);
+  } catch {
+    // Try to recover truncated JSON
+    let fixed = cleaned.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"{}[\]]*$/, '');
+    const openB = (fixed.match(/\[/g) || []).length - (fixed.match(/\]/g) || []).length;
+    const openC = (fixed.match(/\{/g) || []).length - (fixed.match(/\}/g) || []).length;
+    for (let i = 0; i < openB; i++) fixed += ']';
+    for (let i = 0; i < openC; i++) fixed += '}';
+    fixed = fixed.replace(/,\s*([}\]])/g, '$1');
 
-    // Validate structure
-    if (!parsed.textBlocks) parsed.textBlocks = [];
-    if (!parsed.shapeBlocks) parsed.shapeBlocks = [];
-    if (!parsed.imageRegions) parsed.imageRegions = [];
-
-    return parsed;
-  } catch (parseError) {
-    console.warn(
-      'Failed to parse JSON response. Raw (first 300 chars):',
-      cleaned.substring(0, 300)
-    );
-    // Return safe default
-    return { textBlocks: [], shapeBlocks: [], imageRegions: [] };
+    try {
+      parsed = JSON.parse(fixed);
+    } catch {
+      console.warn('Failed to parse AI response:', cleaned.substring(0, 300));
+      return EMPTY;
+    }
   }
+
+  // Normalize — only care about textBlocks
+  if (!Array.isArray(parsed.textBlocks)) parsed.textBlocks = [];
+
+  const clamp = (v) => typeof v === 'number' && isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
+
+  parsed.textBlocks = parsed.textBlocks
+    .filter(b => b && typeof b.text === 'string' && b.text.trim().length > 0)
+    .map(b => ({
+      text: b.text.trim(),
+      x: clamp(b.x),
+      y: clamp(b.y),
+      w: Math.max(0.02, clamp(b.w)),
+      h: Math.max(0.01, clamp(b.h)),
+      fontSize: typeof b.fontSize === 'number' && b.fontSize >= 6 && b.fontSize <= 72
+        ? Math.round(b.fontSize) : 16,
+      bold: !!b.bold,
+      align: ['left', 'center', 'right'].includes(b.align) ? b.align : 'left',
+    }));
+
+  if (!Array.isArray(parsed.imageRegions)) parsed.imageRegions = [];
+
+  parsed.imageRegions = parsed.imageRegions
+    .filter(b => b && typeof b.x === 'number')
+    .map(b => ({
+      x: clamp(b.x),
+      y: clamp(b.y),
+      w: Math.max(0.02, clamp(b.w)),
+      h: Math.max(0.02, clamp(b.h)),
+      type: b.type || 'photo',
+    }));
+
+  return { textBlocks: parsed.textBlocks, imageRegions: parsed.imageRegions };
 }
 
 /**
- * Validate that response has expected structure
- * @param {object} response - Response from callOpenRouter
- * @returns {boolean}
+ * Validate response structure
+ * @param {object} response
+ * @returns {{ valid: boolean, normalized: object|null, warnings: string[] }}
  */
 export function validateResponse(response) {
+  const warnings = [];
+
   if (!response || typeof response !== 'object') {
-    return false;
+    return { valid: false, normalized: null, warnings: ['Response is not an object'] };
   }
 
-  const hasRequiredArrays =
-    Array.isArray(response.textBlocks) &&
-    Array.isArray(response.shapeBlocks) &&
-    Array.isArray(response.imageRegions);
-
-  if (!hasRequiredArrays) {
-    return false;
+  if (!Array.isArray(response.textBlocks)) {
+    return { valid: false, normalized: null, warnings: ['textBlocks missing or not an array'] };
   }
 
-  // Basic validation of text blocks
-  for (const block of response.textBlocks) {
-    if (
-      typeof block.text !== 'string' ||
-      typeof block.x !== 'number' ||
-      typeof block.y !== 'number' ||
-      typeof block.w !== 'number' ||
-      typeof block.h !== 'number'
-    ) {
-      return false;
-    }
-  }
+  const textBlocks = response.textBlocks.filter((b, i) => {
+    const ok = typeof b.text === 'string' && typeof b.x === 'number' &&
+      typeof b.y === 'number' && typeof b.w === 'number' && typeof b.h === 'number';
+    if (!ok) warnings.push(`textBlocks[${i}] dropped — invalid fields`);
+    return ok;
+  });
 
-  // Basic validation of image regions
-  for (const region of response.imageRegions) {
-    if (
-      typeof region.x !== 'number' ||
-      typeof region.y !== 'number' ||
-      typeof region.w !== 'number' ||
-      typeof region.h !== 'number'
-    ) {
-      return false;
-    }
-  }
+  const imageRegions = Array.isArray(response.imageRegions)
+    ? response.imageRegions.filter((b, i) => {
+        const ok = typeof b.x === 'number' && typeof b.y === 'number' &&
+          typeof b.w === 'number' && typeof b.h === 'number';
+        if (!ok) warnings.push(`imageRegions[${i}] dropped — invalid fields`);
+        return ok;
+      })
+    : [];
 
-  return true;
+  return { valid: true, normalized: { textBlocks, imageRegions }, warnings };
 }

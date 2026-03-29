@@ -4,50 +4,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TIERS, getMaxPages } from '../lib/tiers';
 import { useTier } from '../lib/TierContext';
 
-const SLIDE_PROMPT = `You are converting a rasterized presentation slide into separate editable elements for PowerPoint.
-
-Your job: decompose this slide image into 3 types of elements.
-
-Return a JSON object with THREE arrays:
-
-1. "textBlocks": ONLY text that sits on solid-color backgrounds (titles, body text, bullet points, captions, footnotes).
-   For each:
-   - "text": exact text content (preserve line breaks as \\n)
-   - "x": left position as fraction of image width (0.0 to 1.0)
-   - "y": top position as fraction of image height (0.0 to 1.0)
-   - "w": width as fraction
-   - "h": height as fraction
-   - "fontSize": estimated font size in points (8-48)
-   - "bold": true if text appears bold
-
-   CRITICAL: Do NOT include text that is part of an image, chart, map, diagram, logo, or infographic.
-   Examples of text to EXCLUDE from textBlocks:
-   - City names on a map (Foggia, Bari, Lecce, etc.)
-   - Numbers/percentages on a pie chart or bar chart
-   - Labels inside diagrams or flowcharts
-   - Text inside logos or icons
-   This text belongs to the image and will be captured as part of the imageRegion.
-
-2. "shapeBlocks": colored rectangles, bars, banners, containers — solid-color geometric areas.
-   For each:
-   - "x", "y", "w", "h": position as fractions
-   - "roundedCorners": true if rounded
-   - "description": brief label
-
-3. "imageRegions": photos, charts, maps, logos, icons, diagrams, infographics — any visual element that is NOT plain text on a solid background.
-   For each:
-   - "x", "y", "w", "h": position as fractions
-   IMPORTANT: Include the FULL bounding box of each image/chart/map, including any labels or legends that are part of it.
-
-Rules:
-- Be PRECISE with positions — bounding boxes must tightly fit each element
-- Group related lines into one textBlock (e.g., a title with subtitle = one block)
-- Do NOT include the main slide background as a shape
-- Do NOT include watermarks or "NotebookLM" text
-- Do NOT include a "color" field — colors are computed from pixels
-
-Return ONLY valid JSON, no markdown, no explanation.`;
-
 const STYLES = `
   :root {
     --bg: #292524;
@@ -444,9 +400,8 @@ export default function Editor() {
   const [currentSlideIdx, setCurrentSlideIdx] = useState(0);
   const [fileName, setFileName] = useState('');
   const [processing, setProcessing] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('nvidia/nemotron-nano-12b-v2-vl:free');
-  const [apiKey, setApiKey] = useState('');
   const [cancelFlag, setCancelFlag] = useState(false);
+  const [progressMsg, setProgressMsg] = useState('');
   const [upgradePrompt, setUpgradePrompt] = useState(null);
   const [showToast, setShowToast] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
@@ -594,6 +549,31 @@ export default function Editor() {
     return cnt ? [Math.round(sR / cnt), Math.round(sG / cnt), Math.round(sB / cnt)] : [0, 0, 0];
   }, []);
 
+  // Crop image regions from a canvas using normalized 0-1 coordinates.
+  // Returns array of { dataUrl, region } where region is the original normalized rect.
+  const cropImageRegions = useCallback((srcCanvas, imageRegions) => {
+    if (!imageRegions || imageRegions.length === 0) return [];
+    const w = srcCanvas.width, h = srcCanvas.height;
+    const results = [];
+    for (const region of imageRegions) {
+      const x = Math.max(0, Math.round((region.x || 0) * w));
+      const y = Math.max(0, Math.round((region.y || 0) * h));
+      const rw = Math.min(w - x, Math.round((region.w || 0) * w));
+      const rh = Math.min(h - y, Math.round((region.h || 0) * h));
+      if (rw < 4 || rh < 4) continue;
+      const crop = document.createElement('canvas');
+      crop.width = rw;
+      crop.height = rh;
+      const ctx = crop.getContext('2d');
+      ctx.drawImage(srcCanvas, x, y, rw, rh, 0, 0, rw, rh);
+      results.push({
+        dataUrl: crop.toDataURL('image/png'),
+        region: { x: region.x || 0, y: region.y || 0, w: region.w || 0, h: region.h || 0 },
+      });
+    }
+    return results;
+  }, []);
+
   const cleanBackground = useCallback((srcCanvas, imgData, textBlocks, imageRegions, shapeBlocks) => {
     const w = srcCanvas.width, h = srcCanvas.height;
     const out = document.createElement('canvas');
@@ -607,6 +587,19 @@ export default function Editor() {
       const bg = sampleBg(px, w, h, s.pxLeft, s.pxTop, s.pxRight, s.pxBottom);
       ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
       ctx.fillRect(s.pxLeft, s.pxTop, s.pxRight - s.pxLeft, s.pxBottom - s.pxTop);
+    }
+
+    // Paint over image regions so they appear as clean background in the PPTX
+    // background layer; they will be re-added as separate image elements.
+    for (const region of (imageRegions || [])) {
+      const x1 = Math.max(0, Math.round((region.x || 0) * w));
+      const y1 = Math.max(0, Math.round((region.y || 0) * h));
+      const x2 = Math.min(w, Math.round(((region.x || 0) + (region.w || 0)) * w));
+      const y2 = Math.min(h, Math.round(((region.y || 0) + (region.h || 0)) * h));
+      if (x2 <= x1 || y2 <= y1) continue;
+      const bg = sampleBg(px, w, h, x1, y1, x2, y2);
+      ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
+      ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
     }
 
     for (const b of textBlocks) {
@@ -625,7 +618,7 @@ export default function Editor() {
     return out;
   }, [sampleBg]);
 
-  const callOpenRouter = useCallback(async (apiKeyVal, model, dataUrl, slideNum) => {
+  const callAIVision = useCallback(async (dataUrl, slideNum) => {
     const maxRetries = 3;
     let lastError = null;
 
@@ -641,42 +634,30 @@ export default function Editor() {
         const resp = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: dataUrl, model, tier })
+          body: JSON.stringify({ image: dataUrl, tier })
         });
 
         if (resp.status === 429) {
-          lastError = new Error('Il modello è sovraccarico. Riprova tra qualche secondo o scegli un altro modello.');
+          lastError = new Error('Modello AI sovraccarico. Riprovo...');
           continue;
         }
         if (resp.status === 503) {
-          lastError = new Error('Il servizio AI è temporaneamente non disponibile. Prova la modalità offline.');
+          lastError = new Error('Servizio AI non disponibile.');
           continue;
         }
         if (!resp.ok) {
-          const err = await resp.text();
-          throw new Error(`AI Vision failed (${resp.status}): ${err.substring(0, 200)}`);
+          const err = await resp.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(err.error || `AI Vision failed (${resp.status})`);
         }
 
-        const data = await resp.json();
-        const text = data.content || data.text;
-        if (!text) throw new Error('AI returned empty response');
-
-        let cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-        if (jsonMatch) cleaned = jsonMatch[0];
-
-        try {
-          const parsed = JSON.parse(cleaned);
-          return parsed;
-        } catch (e) {
-          throw new Error(`L'AI ha restituito una risposta non valida per la slide ${slideNum}. Il testo è stato estratto con OCR.`);
-        }
+        // Server returns already parsed & validated JSON
+        return await resp.json();
       } catch (fetchErr) {
         lastError = fetchErr;
         if (attempt === maxRetries - 1) throw lastError;
       }
     }
-    throw lastError || new Error('AI call failed after retries');
+    throw lastError || new Error('AI call failed');
   }, [cancelFlag, tier]);
 
   const extractBlocksOffline = useCallback((ocrData, imgW, imgH, minConf) => {
@@ -790,7 +771,7 @@ export default function Editor() {
         document.head.appendChild(tessScript);
         await new Promise(r => tessScript.onload = r);
       }
-      tessWorker.current = await window.Tesseract.createWorker('ita', 1);
+      tessWorker.current = await window.Tesseract.createWorker('ita+eng', 1);
 
       const slides = [];
       for (let i = 1; i <= n; i++) {
@@ -808,33 +789,63 @@ export default function Editor() {
         const blocks = [];
 
         // Extract text with AI or OCR
-        if (canUseAI && apiKey) {
+        let aiImageRegions = [];
+        if (canUseAI) {
+          setProgressMsg(`Slide ${i}/${n} — AI Vision in corso...`);
           const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-          const parsed = await callOpenRouter(apiKey, selectedModel, dataUrl, i);
+          let parsed;
+          try {
+            parsed = await callAIVision(dataUrl, i);
+          } catch (aiErr) {
+            console.warn(`⚠️ AI Vision failed for slide ${i}, falling back to OCR:`, aiErr.message);
+            setProgressMsg(`Slide ${i}/${n} — AI non disponibile, uso OCR...`);
+            parsed = null;
+          }
 
-          const textBlocks = (parsed.textBlocks || []).map(tb => {
-            const pxLeft = Math.round((tb.x || 0) * canvas.width);
-            const pxTop = Math.round((tb.y || 0) * canvas.height);
-            const pxRight = Math.round(((tb.x || 0) + (tb.w || 0.1)) * canvas.width);
-            const pxBottom = Math.round(((tb.y || 0) + (tb.h || 0.05)) * canvas.height);
-            const bg = sampleBg(imgData.data, canvas.width, canvas.height, pxLeft, pxTop, pxRight, pxBottom);
-            const tc = getTextColor(imgData.data, canvas.width, canvas.height, pxLeft, pxTop, pxRight, pxBottom, bg);
-            return {
-              text: tb.text || '', x: tb.x || 0, y: tb.y || 0, w: tb.w || 0.1, h: tb.h || 0.05,
-              numLines: (tb.text || '').split('\n').length,
-              pxLeft, pxTop, pxRight, pxBottom, aiFontSize: tb.fontSize || null, aiBold: tb.bold || false,
-            };
-          });
+          if (parsed && parsed.textBlocks && parsed.textBlocks.length > 0) {
+            // AI Vision succeeded — use AI results
+            aiImageRegions = parsed.imageRegions || [];
 
-          for (const tb of textBlocks) {
-            blocks.push({
-              text: tb.text, x: tb.x, y: tb.y, w: tb.w, h: tb.h, numLines: tb.numLines,
-              pxLeft: tb.pxLeft, pxTop: tb.pxTop, pxRight: tb.pxRight, pxBottom: tb.pxBottom,
-              aiFontSize: tb.aiFontSize, aiBold: tb.aiBold, overImage: false, pixelColor: '000000', bgColor: '#FFFFFF'
+            const textBlocks = (parsed.textBlocks || []).map(tb => {
+              const pxLeft = Math.round((tb.x || 0) * canvas.width);
+              const pxTop = Math.round((tb.y || 0) * canvas.height);
+              const pxRight = Math.round(((tb.x || 0) + (tb.w || 0.1)) * canvas.width);
+              const pxBottom = Math.round(((tb.y || 0) + (tb.h || 0.05)) * canvas.height);
+              const bg = sampleBg(imgData.data, canvas.width, canvas.height, pxLeft, pxTop, pxRight, pxBottom);
+              const tc = getTextColor(imgData.data, canvas.width, canvas.height, pxLeft, pxTop, pxRight, pxBottom, bg);
+              return {
+                text: tb.text || '', x: tb.x || 0, y: tb.y || 0, w: tb.w || 0.1, h: tb.h || 0.05,
+                numLines: (tb.text || '').split('\n').length,
+                pxLeft, pxTop, pxRight, pxBottom, aiFontSize: tb.fontSize || null, aiBold: tb.bold || false,
+              };
             });
+
+            for (const tb of textBlocks) {
+              blocks.push({
+                text: tb.text, x: tb.x, y: tb.y, w: tb.w, h: tb.h, numLines: tb.numLines,
+                pxLeft: tb.pxLeft, pxTop: tb.pxTop, pxRight: tb.pxRight, pxBottom: tb.pxBottom,
+                aiFontSize: tb.aiFontSize, aiBold: tb.aiBold, overImage: false, pixelColor: '000000', bgColor: '#FFFFFF'
+              });
+            }
+          } else {
+            // AI failed or returned empty — fallback to OCR for this slide
+            setProgressMsg(`Slide ${i}/${n} — OCR fallback...`);
+            const ocrResult = await tessWorker.current.recognize(canvas);
+            const tessBlocks = extractBlocksOffline(ocrResult.data, canvas.width, canvas.height, 0.3);
+            for (const tb of tessBlocks) {
+              const bg = sampleBg(imgData.data, canvas.width, canvas.height, tb.pxLeft, tb.pxTop, tb.pxRight, tb.pxBottom);
+              const tc = getTextColor(imgData.data, canvas.width, canvas.height, tb.pxLeft, tb.pxTop, tb.pxRight, tb.pxBottom, bg);
+              const colorHex = tc.map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
+              blocks.push({
+                text: tb.text, x: tb.x, y: tb.y, w: tb.w, h: tb.h, numLines: tb.numLines,
+                pxLeft: tb.pxLeft, pxTop: tb.pxTop, pxRight: tb.pxRight, pxBottom: tb.pxBottom,
+                aiFontSize: null, aiBold: false, overImage: false, pixelColor: colorHex, bgColor: `rgb(${bg[0]},${bg[1]},${bg[2]})`
+              });
+            }
           }
         } else {
-          // OCR fallback
+          // Free tier — OCR only
+          setProgressMsg(`Slide ${i}/${n} — OCR in corso...`);
           const ocrResult = await tessWorker.current.recognize(canvas);
           const tessBlocks = extractBlocksOffline(ocrResult.data, canvas.width, canvas.height, 0.3);
           for (const tb of tessBlocks) {
@@ -849,14 +860,17 @@ export default function Editor() {
           }
         }
 
-        const cleaned = cleanBackground(canvas, imgData, blocks, [], []);
+        // Crop image regions from the high-res canvas before cleaning the background
+        const extractedImages = cropImageRegions(canvas, aiImageRegions);
+
+        const cleaned = cleanBackground(canvas, imgData, blocks, aiImageRegions, []);
         slides.push({
           origDataUrl: canvas.toDataURL('image/jpeg', 0.92),
           cleanedDataUrl: cleaned.toDataURL('image/jpeg', 0.92),
           origImgData: imgData,
           blocks,
-          extracted: [],
-          imgRegions: [],
+          extracted: extractedImages,
+          imgRegions: aiImageRegions,
           shapes: [],
           width: canvas.width,
           height: canvas.height,
@@ -873,7 +887,7 @@ export default function Editor() {
       setProcessing(false);
       alert(`Error: ${err.message}`);
     }
-  }, [tier, maxPages, canUseAI, apiKey, selectedModel, callOpenRouter, sampleBg, getTextColor, cleanBackground, extractBlocksOffline, cancelFlag, showUpgradePrompt]);
+  }, [tier, maxPages, canUseAI, callAIVision, sampleBg, getTextColor, cleanBackground, cropImageRegions, extractBlocksOffline, cancelFlag, showUpgradePrompt]);
 
   const handleTextEdit = useCallback((slideIdx, blockIdx, newText) => {
     const newSlides = [...allSlides];
@@ -1005,6 +1019,18 @@ export default function Editor() {
       const sl = pptx.addSlide();
       sl.addImage({ data: s.cleanedDataUrl, x: 0, y: 0, w: SW, h: SH });
 
+      // Add extracted image regions as separate positioned elements
+      for (const ei of (s.extracted || [])) {
+        const { x, y, w, h } = ei.region;
+        sl.addImage({
+          data: ei.dataUrl,
+          x: x * SW,
+          y: y * SH,
+          w: w * SW,
+          h: h * SH,
+        });
+      }
+
       for (const b of s.blocks) {
         const blockH = b.h * SH;
         const nLines = Math.max(b.numLines || 1, 1);
@@ -1058,8 +1084,8 @@ export default function Editor() {
         <div className="editor-main" style={{ justifyContent: 'center', alignItems: 'center' }}>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '48px', marginBottom: '16px', animation: 'spin 1s linear infinite' }}>⟳</div>
-            <h3>Sto elaborando le slide...</h3>
-            <p style={{ color: 'var(--text-dim)' }}>Dipende dal numero di pagine e dal modello AI selezionato</p>
+            <h3>{progressMsg || 'Sto elaborando le slide...'}</h3>
+            <p style={{ color: 'var(--text-dim)' }}>Dipende dal numero di pagine e dal modello AI</p>
           </div>
         </div>
       </div>

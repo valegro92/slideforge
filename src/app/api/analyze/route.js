@@ -7,15 +7,14 @@
  * Request body:
  * {
  *   image: string (base64 data URL),
- *   model: string,
+ *   model?: string (optional — server auto-selects if omitted),
  *   tier: string (free, pro, enterprise)
  * }
  *
  * Response:
  * {
  *   textBlocks: [...],
- *   shapeBlocks: [...],
- *   imageRegions: [...]
+ *   imageRegions?: [...]
  * }
  */
 
@@ -30,9 +29,18 @@ const requestCounts = new Map();
  */
 const RATE_LIMITS = {
   free: 10,
-  pro: 100,
+  pro: 200,
   enterprise: 1000,
 };
+
+const DEFAULT_MODELS = {
+  pro: 'google/gemini-2.5-flash',
+  enterprise: 'google/gemini-2.5-flash',
+};
+
+function getModelForTier(tier) {
+  return DEFAULT_MODELS[tier] || null;
+}
 
 /**
  * Check if request is rate limited
@@ -92,10 +100,8 @@ function validateRequest(body) {
     errors.push('image must be a valid base64 data URL');
   }
 
-  if (!body.model) {
-    errors.push('Missing required field: model');
-  } else if (typeof body.model !== 'string') {
-    errors.push('model must be a string');
+  if (body.model && typeof body.model !== 'string') {
+    errors.push('model must be a string if provided');
   }
 
   if (!body.tier) {
@@ -143,12 +149,12 @@ export async function POST(request) {
     }
 
     // Validate request
-    const validation = validateRequest(body);
-    if (!validation.valid) {
+    const requestValidation = validateRequest(body);
+    if (!requestValidation.valid) {
       return new Response(
         JSON.stringify({
           error: 'Validation failed',
-          details: validation.errors
+          details: requestValidation.errors
         }),
         {
           status: 400,
@@ -157,7 +163,15 @@ export async function POST(request) {
       );
     }
 
-    const { image, model, tier } = body;
+    const { image, tier } = body;
+    const model = body.model || getModelForTier(tier);
+
+    if (!model) {
+      return new Response(
+        JSON.stringify({ error: 'No AI model available for this tier' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Check tier permissions
     if (!canUseModel(tier, model)) {
@@ -214,30 +228,43 @@ export async function POST(request) {
       );
     }
 
-    // Validate response structure
-    if (!validateResponse(response)) {
-      console.warn('Invalid response structure from OpenRouter:', response);
+    // Validate and normalize response structure
+    const validation = validateResponse(response);
+
+    if (!validation.valid) {
+      console.error(
+        '[/api/analyze] Response failed validation. Reasons:',
+        validation.warnings,
+        '\nRaw response (first 500 chars):',
+        JSON.stringify(response).substring(0, 500)
+      );
       return new Response(
         JSON.stringify({
           error: 'Invalid response from AI model',
-          details: 'Response did not match expected structure'
+          details: validation.warnings.join('; '),
         }),
         {
           status: 502,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
         }
       );
     }
 
-    // Success
+    // Log any non-fatal warnings (e.g. dropped blocks, defaulted arrays)
+    if (validation.warnings.length > 0) {
+      console.warn('[/api/analyze] Response normalized with warnings:', validation.warnings);
+    }
+
+    // Success — same image always produces the same result, safe to cache
     return new Response(
-      JSON.stringify(response),
+      JSON.stringify(validation.normalized),
       {
         status: 200,
         headers: {
           'Content-Type': 'application/json',
-          'Cache-Control': 'no-store'
-        }
+          // Cache for 1 hour in the browser; CDN/proxy may also cache
+          'Cache-Control': 'private, max-age=3600',
+        },
       }
     );
 
