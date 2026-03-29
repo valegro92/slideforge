@@ -994,9 +994,16 @@ export default function Editor({ onReset }) {
       const pSlide = pptx.addSlide();
       const det = slide.detection;
 
-      // Background: inpainted image if available, else original
-      const bgDataUrl = slide.cleanedDataUrl || slide.origDataUrl;
-      pSlide.addImage({ data: bgDataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
+      // CRITICAL: only add text/image elements if inpainting succeeded.
+      // If cleanedDataUrl is null, the original image still has text → no overlay allowed.
+      const hasCleanBg = !!slide.cleanedDataUrl;
+      pSlide.addImage({
+        data: hasCleanBg ? slide.cleanedDataUrl : slide.origDataUrl,
+        x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
+      });
+
+      // Skip text and image elements if background still has original text
+      if (!hasCleanBg) continue;
 
       // Image regions: crop from ORIGINAL image and add as separate PPTX elements
       for (const idx of slide.grabbedImageIndices) {
