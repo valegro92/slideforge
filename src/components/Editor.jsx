@@ -200,6 +200,32 @@ async function extractTextFromPage(page) {
   return merged;
 }
 
+// ─── Fallback: estrazione via AI Vision per PDF raster ────────────────────────
+
+async function extractTextViaAI(imageDataUrl, email, tier) {
+  const resp = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: imageDataUrl, email, tier }),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.error || `AI ${resp.status}`);
+  }
+  const data = await resp.json();
+  return Array.isArray(data.textBlocks) ? data.textBlocks.map(tb => ({
+    text: tb.text || '',
+    x: typeof tb.x === 'number' ? tb.x : 0,
+    y: typeof tb.y === 'number' ? tb.y : 0,
+    w: typeof tb.w === 'number' ? tb.w : 0.1,
+    h: typeof tb.h === 'number' ? tb.h : 0.05,
+    fontSize: typeof tb.fontSize === 'number' ? tb.fontSize : 16,
+    bold: tb.bold === true,
+    italic: false,
+    align: tb.align || 'left',
+  })) : [];
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 
 function makeSlide(origDataUrl, textBlocks) {
@@ -209,7 +235,7 @@ function makeSlide(origDataUrl, textBlocks) {
 // ─── Editor ───────────────────────────────────────────────────────────────────
 
 export default function Editor({ onReset }) {
-  const { tier: rawTier, isLoggedIn } = useTier();
+  const { tier: rawTier, isLoggedIn, user } = useTier();
   const tier = resolveTier(rawTier || '');
   const tierConfig = TIERS[tier] || null;
   const maxPages = getMaxPages(tier);
@@ -241,35 +267,49 @@ export default function Editor({ onReset }) {
       const buf = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
       const numPages = Math.min(pdf.numPages, maxPages);
-      setProgress({ done: 0, total: numPages, label: `Processando ${numPages} pagine...` });
+      setProgress({ done: 0, total: numPages, label: `Caricamento ${numPages} pagine...` });
 
-      const result = [];
-      let totalTextsFound = 0;
+      // Step 1: render tutte le pagine come immagini + tenta estrazione diretta.
+      const pages = [];
       for (let i = 1; i <= numPages; i++) {
         const page = await pdf.getPage(i);
-
-        // 1. Render dell'immagine (anteprima preview)
-        const viewport = page.getViewport({ scale: 1.5 });
+        const viewport = page.getViewport({ scale: 2 });
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
-        // 2. Estrazione testi DAL PDF (non OCR!)
-        const textBlocks = await extractTextFromPage(page);
-        totalTextsFound += textBlocks.length;
+        // Tentativo 1: testo vettoriale dal PDF (PDF testuali — istantaneo)
+        const directBlocks = await extractTextFromPage(page);
 
-        result.push(makeSlide(dataUrl, textBlocks));
-        setProgress({ done: i, total: numPages, label: `Pagina ${i} / ${numPages}` });
+        pages.push({ dataUrl, directBlocks });
+        setProgress({ done: i, total: numPages, label: `Caricamento pagina ${i} / ${numPages}` });
       }
 
-      if (totalTextsFound === 0) {
-        setGlobalError('Nessun testo selezionabile trovato nel PDF. Probabilmente e\' una scansione di immagini, non un PDF testuale.');
-        setPhase('upload');
+      const totalDirectTexts = pages.reduce((acc, p) => acc + p.directBlocks.length, 0);
+
+      // Step 2: se il PDF ha testo vettoriale → usa quello (immediato, perfetto).
+      if (totalDirectTexts > 0) {
+        setSlides(pages.map(p => makeSlide(p.dataUrl, p.directBlocks)));
+        setPhase('editing');
         return;
       }
 
+      // Step 3: PDF raster (es. NotebookLM) → fallback OpenRouter Vision per ogni pagina.
+      setProgress({ done: 0, total: numPages, label: 'PDF tipo immagine: uso AI Vision...' });
+      const result = [];
+      for (let i = 0; i < pages.length; i++) {
+        setProgress({ done: i, total: numPages, label: `AI estrae testi: pagina ${i + 1} / ${numPages}` });
+        try {
+          const blocks = await extractTextViaAI(pages[i].dataUrl, user?.email, tier);
+          result.push(makeSlide(pages[i].dataUrl, blocks));
+        } catch (err) {
+          console.error('AI extraction failed for page', i + 1, err);
+          result.push(makeSlide(pages[i].dataUrl, []));
+        }
+      }
+      setProgress({ done: numPages, total: numPages, label: 'Pronto' });
       setSlides(result);
       setPhase('editing');
     } catch (err) {
@@ -277,7 +317,7 @@ export default function Editor({ onReset }) {
       setGlobalError(`Errore: ${err.message}`);
       setPhase('upload');
     }
-  }, [maxPages]);
+  }, [maxPages, user, tier]);
 
   const handleFileSelect = useCallback((file) => {
     if (!file || file.type !== 'application/pdf') return;
