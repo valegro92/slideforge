@@ -58,16 +58,14 @@ const STYLES = `
     aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden;
     box-shadow: 0 8px 32px rgba(0,0,0,0.45); background: #FFFFFF; }
   .editable-text-block { position: absolute; box-sizing: border-box;
-    background: transparent;
-    outline: 1px dashed rgba(0,0,0,0.18);
-    cursor: text; padding: 1px 2px; line-height: 1.15;
+    background: transparent; outline: none;
+    cursor: text; padding: 0; line-height: 1.15;
     white-space: pre-wrap; word-break: break-word; overflow: visible;
     pointer-events: all; min-width: 8px; min-height: 14px;
     color: #222 !important; }
-  .editable-text-block:hover { outline: 1.5px dashed rgba(45,212,168,0.65);
-    background: rgba(45,212,168,0.04); }
+  .editable-text-block:hover { outline: 1.5px dashed rgba(45,212,168,0.5); }
   .editable-text-block:focus { outline: 2px solid var(--accent);
-    background: rgba(255,255,255,0.04); }
+    background: rgba(255,255,255,0.6); }
   .ed-error { background: rgba(248,113,113,0.1); border: 1px solid var(--error);
     color: var(--error); padding: 12px 16px; border-radius: 8px;
     font-size: 13px; max-width: 600px; margin: 0 auto; }
@@ -141,6 +139,93 @@ function loadPptxGen() {
     document.head.appendChild(script);
   });
   return pptxPromise;
+}
+
+// ─── Smart text removal: cancella i pixel di testo, mantieni grafica ─────────
+// Per ogni text-block, identifica i pixel "diversi dallo sfondo" (= il testo)
+// e li sostituisce col colore di sfondo dominante della zona, mantenendo
+// pattern, icone, gradienti tutto intorno.
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+async function smartTextRemoval(origDataUrl, textBlocks) {
+  if (!textBlocks || textBlocks.length === 0) {
+    return origDataUrl;
+  }
+  const img = await loadImage(origDataUrl);
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+
+  const PAD = 0.10;             // espansione 10% del bbox
+  const DIST_THRESHOLD = 70;    // soglia distanza colore per "testo"
+
+  for (const tb of textBlocks) {
+    const x0 = (tb.x || 0) * W;
+    const y0 = (tb.y || 0) * H;
+    const w0 = (tb.w || 0) * W;
+    const h0 = (tb.h || 0) * H;
+    if (w0 < 4 || h0 < 4) continue;
+    const padX = w0 * PAD;
+    const padY = h0 * PAD;
+    const x = Math.max(0, Math.floor(x0 - padX));
+    const y = Math.max(0, Math.floor(y0 - padY));
+    const w = Math.min(W - x, Math.ceil(w0 + padX * 2));
+    const h = Math.min(H - y, Math.ceil(h0 + padY * 2));
+    if (w < 4 || h < 4) continue;
+
+    const region = ctx.getImageData(x, y, w, h);
+    const px = region.data;
+
+    // Background dominante: mediana RGB sui pixel piu' chiari (40% top luma)
+    const lumas = [];
+    for (let p = 0; p < px.length; p += 4) {
+      lumas.push((px[p] * 0.299 + px[p + 1] * 0.587 + px[p + 2] * 0.114) | 0);
+    }
+    lumas.sort((a, b) => a - b);
+    const lightThreshold = lumas[Math.floor(lumas.length * 0.4)] || 128;
+
+    const bgR = [], bgG = [], bgB = [];
+    for (let p = 0; p < px.length; p += 4) {
+      const lum = px[p] * 0.299 + px[p + 1] * 0.587 + px[p + 2] * 0.114;
+      if (lum >= lightThreshold) {
+        bgR.push(px[p]); bgG.push(px[p + 1]); bgB.push(px[p + 2]);
+      }
+    }
+    if (bgR.length === 0) continue;
+    bgR.sort((a, b) => a - b);
+    bgG.sort((a, b) => a - b);
+    bgB.sort((a, b) => a - b);
+    const mid = bgR.length >> 1;
+    const bg = { r: bgR[mid], g: bgG[mid], b: bgB[mid] };
+
+    // Sostituisci pixel "scuri" (= testo) col background
+    for (let p = 0; p < px.length; p += 4) {
+      const dr = Math.abs(px[p] - bg.r);
+      const dg = Math.abs(px[p + 1] - bg.g);
+      const db = Math.abs(px[p + 2] - bg.b);
+      if (dr + dg + db > DIST_THRESHOLD) {
+        px[p] = bg.r;
+        px[p + 1] = bg.g;
+        px[p + 2] = bg.b;
+      }
+    }
+    ctx.putImageData(region, x, y);
+  }
+
+  return canvas.toDataURL('image/jpeg', 0.92);
 }
 
 // ─── Estrazione testi DIRETTAMENTE dal PDF (no AI, no OCR) ────────────────────
@@ -228,8 +313,8 @@ async function extractTextViaAI(imageDataUrl, email, tier) {
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-function makeSlide(origDataUrl, textBlocks) {
-  return { origDataUrl, textBlocks, edited: {} };
+function makeSlide(origDataUrl, cleanedDataUrl, textBlocks) {
+  return { origDataUrl, cleanedDataUrl, textBlocks, edited: {} };
 }
 
 // ─── Editor ───────────────────────────────────────────────────────────────────
@@ -291,7 +376,14 @@ export default function Editor({ onReset }) {
 
       // Step 2: se il PDF ha testo vettoriale → usa quello (immediato, perfetto).
       if (totalDirectTexts > 0) {
-        setSlides(pages.map(p => makeSlide(p.dataUrl, p.directBlocks)));
+        setProgress({ done: 0, total: numPages, label: 'Pulisco i testi originali dalle immagini...' });
+        const result = [];
+        for (let i = 0; i < pages.length; i++) {
+          const cleaned = await smartTextRemoval(pages[i].dataUrl, pages[i].directBlocks);
+          result.push(makeSlide(pages[i].dataUrl, cleaned, pages[i].directBlocks));
+          setProgress({ done: i + 1, total: numPages, label: `Pulizia ${i + 1} / ${numPages}` });
+        }
+        setSlides(result);
         setPhase('editing');
         return;
       }
@@ -303,10 +395,11 @@ export default function Editor({ onReset }) {
         setProgress({ done: i, total: numPages, label: `AI estrae testi: pagina ${i + 1} / ${numPages}` });
         try {
           const blocks = await extractTextViaAI(pages[i].dataUrl, user?.email, tier);
-          result.push(makeSlide(pages[i].dataUrl, blocks));
+          const cleaned = await smartTextRemoval(pages[i].dataUrl, blocks);
+          result.push(makeSlide(pages[i].dataUrl, cleaned, blocks));
         } catch (err) {
           console.error('AI extraction failed for page', i + 1, err);
-          result.push(makeSlide(pages[i].dataUrl, []));
+          result.push(makeSlide(pages[i].dataUrl, pages[i].dataUrl, []));
         }
       }
       setProgress({ done: numPages, total: numPages, label: 'Pronto' });
@@ -350,7 +443,11 @@ export default function Editor({ onReset }) {
 
       for (const slide of slides) {
         const pSlide = pptx.addSlide();
-        pSlide.background = { color: 'FFFFFF' };
+        // Sfondo: immagine "pulita" (testi originali rimossi, grafica intatta)
+        pSlide.addImage({
+          data: slide.cleanedDataUrl || slide.origDataUrl,
+          x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
+        });
 
         for (let i = 0; i < slide.textBlocks.length; i++) {
           const tb = slide.textBlocks[i];
@@ -552,6 +649,16 @@ function SlideCard({ slide, index, onUpdateText }) {
       </div>
 
       <div ref={wrapRef} className="slide-canvas-wrap">
+        <img
+          src={slide.cleanedDataUrl || slide.origDataUrl}
+          alt={`Slide ${index + 1}`}
+          draggable={false}
+          style={{
+            position: 'absolute', inset: 0,
+            width: '100%', height: '100%', objectFit: 'fill',
+            pointerEvents: 'none', userSelect: 'none',
+          }}
+        />
         {slide.textBlocks.map((tb, bi) => (
           <div key={bi} contentEditable suppressContentEditableWarning
             className="editable-text-block"
