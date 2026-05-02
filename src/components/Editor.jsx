@@ -892,6 +892,7 @@ function createSlideState(origDataUrl, width, height) {
     grabbedTextIndices: new Set(),
     grabbedImageIndices: new Set(),
     editedTexts: {}, // { blockIndex: "edited text" }
+    complexLayout: false,
   };
 }
 
@@ -1044,6 +1045,17 @@ export default function Editor({ onReset }) {
         console.warn('[runDetection] preview background failed', err);
       }
 
+      // Heuristic "complex layout": segnali che l'AI ha probabilmente
+      // approssimato male il contenuto della slide.
+      //  - una imageRegion gigante (>50% area) → l'AI ha trattato lo sfondo
+      //    decorato come "immagine" invece di separarne i testi
+      //  - meno di 3 textBlocks → l'AI ha verosimilmente perso del testo
+      const hasGiantRegion = imageRegions.some(
+        (r) => (r.w || 0) * (r.h || 0) > 0.5
+      );
+      const tooFewBlocks = textBlocks.length < 3;
+      const complexLayout = hasGiantRegion || tooFewBlocks;
+
       setSlides(prev => {
         const next = [...prev];
         next[slideIndex] = {
@@ -1053,6 +1065,7 @@ export default function Editor({ onReset }) {
           grabbedTextIndices: new Set(textBlocks.map((_, i) => i)),
           grabbedImageIndices: new Set(imageRegions.map((_, i) => i)),
           cleanedDataUrl,
+          complexLayout,
         };
         return next;
       });
@@ -1433,7 +1446,7 @@ function UploadZone({ isDragOver, onDragOver, onDragLeave, onDrop, onClick, maxP
 // ─── SlideCard sub-component ──────────────────────────────────────────────────
 
 function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
-  const { origDataUrl, detection, grabbedTextIndices, grabbedImageIndices, mode, exporting } = slide;
+  const { origDataUrl, detection, grabbedTextIndices, grabbedImageIndices, mode, exporting, complexLayout } = slide;
   const det = detection;
   const isLoading = det.status === 'loading';
   const isError = det.status === 'error';
@@ -1449,6 +1462,20 @@ function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
         {isEditing && (
           <span style={{ marginLeft: 8, color: 'var(--accent)', fontWeight: 600 }}>
             · modalità modifica
+          </span>
+        )}
+        {isEditing && complexLayout && (
+          <span
+            title="L'AI ha rilevato un layout complesso (sfondo decorato, pattern o pochi testi). Verifica il risultato e usa Riprova se serve."
+            style={{
+              marginLeft: 8, color: '#F59E0B', fontWeight: 600,
+              background: 'rgba(245, 158, 11, 0.12)',
+              border: '1px solid rgba(245, 158, 11, 0.4)',
+              padding: '2px 8px', borderRadius: 4, fontSize: 10,
+              letterSpacing: 0.4,
+            }}
+          >
+            ⚠ LAYOUT COMPLESSO — VERIFICA
           </span>
         )}
       </div>
