@@ -1128,8 +1128,9 @@ export default function Editor({ onReset }) {
     const SLIDE_H = 7.5;
 
     // Genera UNA SOLA volta un canvas bianco 16:9 1920x1080 da usare come
-    // sfondo per ogni slide del PPTX. Niente origDataUrl, niente cleanedDataUrl,
-    // niente imageRegions: solo bianco + i text-block editabili.
+    // sfondo delle slide editabili. Per le slide marcate come "complesse"
+    // (layout che l'AI non e' riuscita a rendere editabile), inseriamo
+    // invece l'immagine originale del PDF come fallback non-editabile.
     const whiteCanvas = document.createElement('canvas');
     whiteCanvas.width = 1920;
     whiteCanvas.height = 1080;
@@ -1141,6 +1142,16 @@ export default function Editor({ onReset }) {
     for (const slide of slideSubset) {
       const pSlide = pptx.addSlide();
       const det = slide.detection || {};
+
+      // Slide "complesse": esportiamo l'originale come immagine intera.
+      // Non sara' editabile ma almeno il contenuto e' integro e leggibile.
+      if (slide.complexLayout && slide.origDataUrl) {
+        pSlide.addImage({
+          data: slide.origDataUrl,
+          x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
+        });
+        continue;
+      }
 
       // 1) Sfondo bianco unico — UNA sola addImage per slide.
       pSlide.addImage({
@@ -1481,11 +1492,19 @@ function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
       </div>
 
       <div className="slide-canvas-wrap">
-        {/* Background image: cleanedDataUrl in editing, originale altrimenti */}
-        <img className="slide-bg-img" src={isEditing && slide.cleanedDataUrl ? slide.cleanedDataUrl : origDataUrl} alt={`Slide ${index + 1}`} draggable={false} />
+        {/* Background image:
+            - slide complessa: mostra l'originale (non-editabile, ma leggibile)
+            - slide editabile: sfondo bianco generato (cleanedDataUrl)
+            - slide pristine: l'originale */}
+        <img
+          className="slide-bg-img"
+          src={isEditing && !complexLayout && slide.cleanedDataUrl ? slide.cleanedDataUrl : origDataUrl}
+          alt={`Slide ${index + 1}`}
+          draggable={false}
+        />
 
         {/* Editing mode: editable text blocks on cleaned background */}
-        {isEditing && (
+        {isEditing && !complexLayout && (
           <div className="slide-overlay" style={{ pointerEvents: 'auto' }}>
             {det.textBlocks.map((tb, bi) => (
               grabbedTextIndices.has(bi) && (
@@ -1567,8 +1586,10 @@ function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
         {/* Editing mode actions: Download PPTX */}
         {isEditing && (
           <div className="editing-toolbar">
-            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-              Clicca sul testo per modificarlo
+            <span style={{ fontSize: 12, color: complexLayout ? '#F59E0B' : 'var(--text-dim)' }}>
+              {complexLayout
+                ? 'Layout troppo complesso: la slide verra\' esportata come immagine non modificabile'
+                : 'Clicca sul testo per modificarlo'}
             </span>
             <div style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.1)' }} />
             <button
