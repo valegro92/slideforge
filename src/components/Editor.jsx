@@ -910,10 +910,6 @@ export default function Editor({ onReset }) {
   const [exportError, setExportError] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ active: false, done: 0, total: 0 });
-  // Modalita' "sfondo bianco": per slide complesse (pattern, sfondi colorati,
-  // testi piccoli ravvicinati) un fondo bianco con solo i text-block editabili
-  // e' piu' leggibile dell'inpaint canvas.
-  const [whiteBackground, setWhiteBackground] = useState(false);
 
   const fileInputRef = useRef(null);
 
@@ -1012,23 +1008,19 @@ export default function Editor({ onReset }) {
       const textBlocks = Array.isArray(data.textBlocks) ? data.textBlocks : [];
       const imageRegions = Array.isArray(data.imageRegions) ? data.imageRegions : [];
 
-      // Inpaint canvas client-side per la preview: cosi' l'utente vede subito
-      // lo sfondo "pulito" del testo originale e puo' modificare i text-block
-      // editabili senza ulteriori click.
+      // Preview con sfondo bianco: l'utente vede direttamente cio' che
+      // sara' esportato (zero ridondanza tra immagine originale e text-block).
       let cleanedDataUrl = null;
-      if (textBlocks.length > 0 || whiteBackground) {
-        try {
-          const allIndices = new Set(textBlocks.map((_, i) => i));
-          const result = await clientSideInpaint(
-            slide.origDataUrl,
-            textBlocks,
-            allIndices,
-            { whiteOnly: whiteBackground }
-          );
-          cleanedDataUrl = result?.dataUrl || null;
-        } catch (err) {
-          console.warn('[runDetection] clientSideInpaint preview failed', err);
-        }
+      try {
+        const result = await clientSideInpaint(
+          slide.origDataUrl,
+          [],
+          new Set(),
+          { whiteOnly: true }
+        );
+        cleanedDataUrl = result?.dataUrl || null;
+      } catch (err) {
+        console.warn('[runDetection] preview background failed', err);
       }
 
       setSlides(prev => {
@@ -1053,7 +1045,7 @@ export default function Editor({ onReset }) {
         return next;
       });
     }
-  }, [slides, tier, user, whiteBackground]);
+  }, [slides, tier, user]);
 
   // ── Batch AI detection: cattura tutte le slide in sequenza ───────────────
 
@@ -1115,35 +1107,24 @@ export default function Editor({ onReset }) {
       //         campionando il colore di sfondo intorno ad ogni text-block.
       //         Risolve il bug dei "doppi testi" anche su sfondi colorati.
       //      c) origDataUrl puro (fallback estremo: niente testo grabbato)
-      let bgDataUrl = slide.origDataUrl;
-      if (whiteBackground) {
-        // Override: sfondo completamente bianco. Garantisce zero residui
-        // su slide complesse (NotebookLM con pattern, sfondi colorati).
-        try {
-          const result = await clientSideInpaint(
-            slide.origDataUrl,
-            det.textBlocks || [],
-            new Set(),
-            { whiteOnly: true }
-          );
-          bgDataUrl = result.dataUrl;
-        } catch (err) {
-          console.warn('[export] white-background generation failed', err);
-        }
-      } else if (hasAiCleanBg) {
-        bgDataUrl = slide.cleanedDataUrl;
-      } else if (hasGrabbedText) {
-        try {
-          const result = await clientSideInpaint(
-            slide.origDataUrl,
-            det.textBlocks,
-            slide.grabbedTextIndices
-          );
-          bgDataUrl = result.dataUrl;
-        } catch (err) {
-          console.warn('[export] clientSideInpaint failed, using original', err);
-          bgDataUrl = slide.origDataUrl;
-        }
+      // Lo sfondo del PPTX e' SEMPRE bianco. L'immagine originale non viene
+      // mai inserita perche' contiene gia' i testi stampati, che si
+      // sovrapporrebbero ai text-block editabili (effetto "doppio testo").
+      // Le icone/foto reali vengono comunque ritagliate dall'originale e
+      // aggiunte come oggetti immagine separati piu' avanti.
+      let bgDataUrl;
+      try {
+        const result = await clientSideInpaint(
+          slide.origDataUrl,
+          [],
+          new Set(),
+          { whiteOnly: true }
+        );
+        bgDataUrl = result.dataUrl;
+      } catch (err) {
+        console.warn('[export] white background failed, falling back to inline white', err);
+        // Fallback: piccolo PNG bianco 1x1 (pptxgen lo scala alla slide)
+        bgDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=';
       }
 
       pSlide.addImage({
@@ -1229,7 +1210,7 @@ export default function Editor({ onReset }) {
 
     const safeName = name.replace(/[^a-z0-9_-]/gi, '_') || 'slideforge';
     await pptx.writeFile({ fileName: `${safeName}.pptx` });
-  }, [whiteBackground]);
+  }, []);
 
   // ── Export single slide ───────────────────────────────────────────────────
 
@@ -1342,22 +1323,6 @@ export default function Editor({ onReset }) {
           <span className="tier-badge">{tierConfig.name}</span>
           {phase === 'slides' && (
             <>
-              <label
-                title="Sostituisce lo sfondo originale con bianco. Utile su slide complesse (pattern, sfondi colorati, testi piccoli) dove l'inpaint canvas lascia residui."
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  fontSize: 12, color: 'var(--text-dim)', cursor: 'pointer',
-                  userSelect: 'none',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={whiteBackground}
-                  onChange={e => setWhiteBackground(e.target.checked)}
-                  style={{ accentColor: 'var(--accent)' }}
-                />
-                Sfondo bianco
-              </label>
               <button className="btn btn-ghost btn-sm" onClick={onReset}>
                 Nuovo PDF
               </button>
