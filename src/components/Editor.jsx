@@ -27,7 +27,7 @@ const STYLES = `
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .btn-primary { background: var(--accent); color: #111; font-weight: 600;
     box-shadow: 0 3px 12px rgba(45,212,168,0.25); }
-  .btn-primary:hover:not(:disabled) { background: var(--accent-light); transform: translateY(-1px); }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-light); }
   .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
   .btn-ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
@@ -45,41 +45,29 @@ const STYLES = `
     justify-content: center; flex: 1; gap: 20px; padding: 60px 24px; }
   .progress-bar-track { width: 340px; max-width: 90vw; height: 6px;
     background: var(--border); border-radius: 3px; overflow: hidden; }
-  .progress-bar-fill { height: 100%; background: var(--accent);
-    border-radius: 3px; transition: width 0.3s ease; }
+  .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 3px;
+    transition: width 0.3s ease; }
   .progress-label { font-size: 14px; color: var(--text-dim); }
   .ed-slides { flex: 1; overflow-y: auto; padding: 32px 24px;
     display: flex; flex-direction: column; align-items: center; gap: 48px; }
-  .slide-wrap { width: 100%; max-width: 1100px;
-    display: flex; flex-direction: column; gap: 0; }
+  .slide-wrap { width: 100%; max-width: 1100px; }
   .slide-label { font-size: 11px; font-weight: 600; color: var(--text-dim);
     text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;
     display: flex; align-items: center; gap: 12px; }
   .slide-canvas-wrap { position: relative; width: 100%;
     aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.45);
-    container-type: inline-size; }
-  .slide-bg-img { display: block; width: 100%; height: 100%;
-    object-fit: fill; pointer-events: none; user-select: none; }
-  .slide-overlay { position: absolute; inset: 0; pointer-events: auto; }
+    box-shadow: 0 8px 32px rgba(0,0,0,0.45); background: #FFFFFF; }
   .editable-text-block { position: absolute; box-sizing: border-box;
     background: transparent;
     outline: 1px dashed rgba(0,0,0,0.18);
-    cursor: text; padding: 2px 4px; line-height: 1.2;
+    cursor: text; padding: 1px 2px; line-height: 1.15;
     white-space: pre-wrap; word-break: break-word; overflow: visible;
-    pointer-events: all; min-width: 20px; min-height: 18px;
+    pointer-events: all; min-width: 8px; min-height: 14px;
     color: #222 !important; }
   .editable-text-block:hover { outline: 1.5px dashed rgba(45,212,168,0.65);
     background: rgba(45,212,168,0.04); }
   .editable-text-block:focus { outline: 2px solid var(--accent);
-    background: rgba(255,255,255,0.04);
-    box-shadow: 0 0 12px rgba(45,212,168,0.2); }
-  .slide-actions { position: absolute; top: 50%; left: 50%;
-    transform: translate(-50%,-50%);
-    display: flex; flex-direction: column; align-items: center;
-    gap: 12px; z-index: 30;
-    background: rgba(20,18,17,0.85); padding: 20px 28px; border-radius: 12px;
-    backdrop-filter: blur(8px); }
+    background: rgba(255,255,255,0.04); }
   .ed-error { background: rgba(248,113,113,0.1); border: 1px solid var(--error);
     color: var(--error); padding: 12px 16px; border-radius: 8px;
     font-size: 13px; max-width: 600px; margin: 0 auto; }
@@ -99,8 +87,6 @@ const STYLES = `
   .export-done p { font-size: 14px; color: var(--text-dim); }
 `;
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
-
 const IconUpload = () => (
   <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -115,14 +101,8 @@ const IconDownload = () => (
     <line x1="12" y1="15" x2="12" y2="3"/>
   </svg>
 );
-const IconEdit = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-  </svg>
-);
 
-// ─── Loaders ──────────────────────────────────────────────────────────────────
+// ─── Loaders CDN ──────────────────────────────────────────────────────────────
 
 let pdfJsPromise = null;
 function loadPdfJs() {
@@ -163,27 +143,79 @@ function loadPptxGen() {
   return pptxPromise;
 }
 
-// ─── Slide state ──────────────────────────────────────────────────────────────
+// ─── Estrazione testi DIRETTAMENTE dal PDF (no AI, no OCR) ────────────────────
+// I PDF di NotebookLM (e quasi tutti i PDF moderni generati da software) hanno
+// il testo come oggetti vettoriali, non come pixel. pdf.js ce li restituisce
+// con coordinate precise, font, dimensione. Niente AI, niente errori.
 
-function makeSlide(origDataUrl, w, h) {
-  return {
-    origDataUrl, width: w, height: h,
-    status: 'pristine', error: null,
-    textBlocks: [], edited: {},
-  };
+async function extractTextFromPage(page) {
+  const viewport = page.getViewport({ scale: 1 });
+  const W = viewport.width;
+  const H = viewport.height;
+  const textContent = await page.getTextContent({ disableCombineTextItems: false });
+
+  const blocks = [];
+  for (const item of textContent.items || []) {
+    const str = (item.str || '').trim();
+    if (!str) continue;
+    // item.transform = [a, b, c, d, e, f]
+    // (a,b,c,d) = scale/rotation, (e,f) = position in PDF coords (origin: bottom-left).
+    const [, , c, d, e, f] = item.transform;
+    const fontHeight = Math.hypot(c, d) || item.height || 12;
+    const widthPx = item.width || 0;
+    // Top-left in viewport coords (origin: top-left).
+    const top = H - f;
+    const left = e;
+
+    blocks.push({
+      text: str,
+      x: left / W,
+      y: Math.max(0, (top - fontHeight) / H),
+      w: Math.max(0.01, widthPx / W),
+      h: Math.max(0.01, fontHeight / H),
+      fontSize: Math.round(fontHeight),
+      bold: /bold|black|heavy/i.test(item.fontName || ''),
+      italic: /italic|oblique/i.test(item.fontName || ''),
+      align: 'left',
+    });
+  }
+
+  // Raggruppa items adiacenti sulla stessa riga (stesso y, x consecutivi).
+  // Cosi' invece di un text-block per ogni glifo/parola, abbiamo uno per riga.
+  blocks.sort((a, b) => a.y - b.y || a.x - b.x);
+  const merged = [];
+  for (const b of blocks) {
+    const last = merged[merged.length - 1];
+    if (last
+      && Math.abs(last.y - b.y) < (last.h * 0.5)
+      && Math.abs(last.fontSize - b.fontSize) < 2
+      && (b.x - (last.x + last.w)) < (last.h * 1.5)) {
+      // estendi il blocco precedente
+      last.text = last.text + (b.x - (last.x + last.w) > last.h * 0.2 ? ' ' : '') + b.text;
+      last.w = (b.x + b.w) - last.x;
+    } else {
+      merged.push({ ...b });
+    }
+  }
+  return merged;
 }
 
-// ─── Editor ────────────────────────────────────────────────────────────────────
+// ─── State ────────────────────────────────────────────────────────────────────
+
+function makeSlide(origDataUrl, textBlocks) {
+  return { origDataUrl, textBlocks, edited: {} };
+}
+
+// ─── Editor ───────────────────────────────────────────────────────────────────
 
 export default function Editor({ onReset }) {
-  const { tier: rawTier, isLoggedIn, user } = useTier();
+  const { tier: rawTier, isLoggedIn } = useTier();
   const tier = resolveTier(rawTier || '');
   const tierConfig = TIERS[tier] || null;
   const maxPages = getMaxPages(tier);
 
-  const [phase, setPhase] = useState('upload');
-  const [renderProgress, setRenderProgress] = useState({ done: 0, total: 0, label: '' });
-  const [batchProgress, setBatchProgress] = useState({ active: false, done: 0, total: 0 });
+  const [phase, setPhase] = useState('upload'); // 'upload'|'processing'|'editing'|'exporting'|'done'
+  const [progress, setProgress] = useState({ done: 0, total: 0, label: '' });
   const [slides, setSlides] = useState([]);
   const [fileName, setFileName] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
@@ -199,97 +231,64 @@ export default function Editor({ onReset }) {
     }
   }, []);
 
-  const renderPdf = useCallback(async (file) => {
-    setPhase('rendering');
+  const processFile = useCallback(async (file) => {
+    setPhase('processing');
     setFileName(file.name.replace(/\.pdf$/i, ''));
-    setRenderProgress({ done: 0, total: 0, label: 'Caricamento PDF...' });
+    setProgress({ done: 0, total: 0, label: 'Caricamento PDF...' });
     setGlobalError(null);
     try {
       const pdfjsLib = await loadPdfJs();
       const buf = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
       const numPages = Math.min(pdf.numPages, maxPages);
-      setRenderProgress({ done: 0, total: numPages, label: `Rendering ${numPages} pagine...` });
+      setProgress({ done: 0, total: numPages, label: `Processando ${numPages} pagine...` });
 
       const result = [];
+      let totalTextsFound = 0;
       for (let i = 1; i <= numPages; i++) {
         const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 2.0 });
+
+        // 1. Render dell'immagine (anteprima preview)
+        const viewport = page.getViewport({ scale: 1.5 });
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-        result.push(makeSlide(dataUrl, viewport.width, viewport.height));
-        setRenderProgress({ done: i, total: numPages, label: `Pagina ${i} / ${numPages}` });
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+        // 2. Estrazione testi DAL PDF (non OCR!)
+        const textBlocks = await extractTextFromPage(page);
+        totalTextsFound += textBlocks.length;
+
+        result.push(makeSlide(dataUrl, textBlocks));
+        setProgress({ done: i, total: numPages, label: `Pagina ${i} / ${numPages}` });
       }
+
+      if (totalTextsFound === 0) {
+        setGlobalError('Nessun testo selezionabile trovato nel PDF. Probabilmente e\' una scansione di immagini, non un PDF testuale.');
+        setPhase('upload');
+        return;
+      }
+
       setSlides(result);
       setPhase('editing');
     } catch (err) {
-      console.error('PDF render error:', err);
-      setGlobalError(`Errore nel rendering del PDF: ${err.message}`);
+      console.error('PDF process error:', err);
+      setGlobalError(`Errore: ${err.message}`);
       setPhase('upload');
     }
   }, [maxPages]);
 
   const handleFileSelect = useCallback((file) => {
     if (!file || file.type !== 'application/pdf') return;
-    renderPdf(file);
-  }, [renderPdf]);
+    processFile(file);
+  }, [processFile]);
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
     setIsDragOver(false);
     handleFileSelect(e.dataTransfer.files[0]);
   }, [handleFileSelect]);
-
-  const extractText = useCallback(async (slideIndex) => {
-    setSlides(prev => prev.map((s, i) =>
-      i === slideIndex ? { ...s, status: 'extracting', error: null } : s
-    ));
-    try {
-      const slide = slides[slideIndex];
-      const resp = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: slide.origDataUrl,
-          email: user?.email,
-          tier,
-        }),
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.error || `Errore AI (${resp.status})`);
-      }
-      const data = await resp.json();
-      const textBlocks = Array.isArray(data.textBlocks) ? data.textBlocks : [];
-      setSlides(prev => prev.map((s, i) =>
-        i === slideIndex
-          ? { ...s, status: 'ready', textBlocks, edited: {} }
-          : s
-      ));
-    } catch (err) {
-      console.error('[extractText]', err);
-      setSlides(prev => prev.map((s, i) =>
-        i === slideIndex ? { ...s, status: 'error', error: err.message } : s
-      ));
-    }
-  }, [slides, user, tier]);
-
-  const extractAll = useCallback(async () => {
-    const indices = slides
-      .map((s, i) => ({ s, i }))
-      .filter(({ s }) => s.status === 'pristine' || s.status === 'error')
-      .map(({ i }) => i);
-    if (indices.length === 0) return;
-    setBatchProgress({ active: true, done: 0, total: indices.length });
-    for (let k = 0; k < indices.length; k++) {
-      try { await extractText(indices[k]); } catch (err) { console.error(err); }
-      setBatchProgress(p => ({ ...p, done: k + 1 }));
-    }
-    setBatchProgress({ active: false, done: 0, total: 0 });
-  }, [slides, extractText]);
 
   const updateText = useCallback((slideIndex, blockIndex, newText) => {
     setSlides(prev => prev.map((s, i) =>
@@ -320,18 +319,24 @@ export default function Editor({ onReset }) {
 
           let tx = Math.max(0, (tb.x || 0) * SLIDE_W);
           let ty = Math.max(0, (tb.y || 0) * SLIDE_H);
-          let tw = Math.max(0.5, (tb.w || 0.1) * SLIDE_W);
-          let th = Math.max(0.25, (tb.h || 0.05) * SLIDE_H);
+          let tw = Math.max(0.4, (tb.w || 0.05) * SLIDE_W);
+          let th = Math.max(0.2, (tb.h || 0.03) * SLIDE_H * 1.5);
           if (tx + tw > SLIDE_W) tw = SLIDE_W - tx;
           if (ty + th > SLIDE_H) th = SLIDE_H - ty;
 
+          // pdf.js fontSize e' in unita' PDF (1pt = 1unit), va bene cosi'.
+          // Convertiamo l'altezza da viewport pixel a punti (1in = 72pt;
+          // ipotizziamo viewport scale 1 = 1pt per unit).
+          const fontPt = Math.max(8, Math.min(48, Math.round(tb.fontSize)));
+
           pSlide.addText(text, {
             x: tx, y: ty, w: tw, h: th,
-            fontSize: Math.max(8, Math.min(48, tb.fontSize || 16)),
+            fontSize: fontPt,
             color: '222222',
             bold: tb.bold === true,
+            italic: tb.italic === true,
             align: tb.align || 'left',
-            fontFace: tb.fontFamily || 'Arial',
+            fontFace: 'Arial',
             wrap: true, valign: 'top', margin: 0,
           });
         }
@@ -369,9 +374,6 @@ export default function Editor({ onReset }) {
     );
   }
 
-  const allReady = slides.length > 0 && slides.every(s => s.status === 'ready');
-  const someReady = slides.some(s => s.status === 'ready');
-
   return (
     <div className="ed-root">
       <header className="ed-header">
@@ -386,20 +388,7 @@ export default function Editor({ onReset }) {
           {phase === 'editing' && (
             <>
               <button className="btn btn-ghost btn-sm" onClick={onReset}>Nuovo PDF</button>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={extractAll}
-                disabled={batchProgress.active || allReady}
-              >
-                {batchProgress.active
-                  ? `Estraggo ${batchProgress.done}/${batchProgress.total}...`
-                  : 'Estrai testi da tutte'}
-              </button>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={exportPptx}
-                disabled={!someReady || batchProgress.active}
-              >
+              <button className="btn btn-primary btn-sm" onClick={exportPptx}>
                 <IconDownload /> Scarica PPTX
               </button>
             </>
@@ -426,13 +415,13 @@ export default function Editor({ onReset }) {
         </UploadZone>
       )}
 
-      {phase === 'rendering' && (
+      {phase === 'processing' && (
         <div className="ed-progress">
-          <div className="progress-label">{renderProgress.label}</div>
+          <div className="progress-label">{progress.label}</div>
           <div className="progress-bar-track">
             <div className="progress-bar-fill" style={{
-              width: renderProgress.total > 0
-                ? `${(renderProgress.done / renderProgress.total) * 100}%`
+              width: progress.total > 0
+                ? `${(progress.done / progress.total) * 100}%`
                 : '10%'
             }}/>
           </div>
@@ -443,9 +432,12 @@ export default function Editor({ onReset }) {
         <div className="ed-slides">
           {globalError && <div className="ed-error">{globalError}</div>}
           {slides.map((slide, si) => (
-            <SlideCard key={si} slide={slide} index={si}
-              onExtract={() => extractText(si)}
-              onUpdateText={(bi, txt) => updateText(si, bi, txt)} />
+            <SlideCard
+              key={si}
+              slide={slide}
+              index={si}
+              onUpdateText={(bi, txt) => updateText(si, bi, txt)}
+            />
           ))}
         </div>
       )}
@@ -495,90 +487,51 @@ function UploadZone({ isDragOver, onDragOver, onDragLeave, onDrop, onClick, maxP
   );
 }
 
-function SlideCard({ slide, index, onExtract, onUpdateText }) {
-  const isPristine = slide.status === 'pristine';
-  const isExtracting = slide.status === 'extracting';
-  const isReady = slide.status === 'ready';
-  const isError = slide.status === 'error';
-
+function SlideCard({ slide, index, onUpdateText }) {
   const wrapRef = useRef(null);
-  const [containerW, setContainerW] = useState(960);
+  const [W, setW] = useState(960);
   useEffect(() => {
     if (!wrapRef.current) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) setContainerW(e.contentRect.width);
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) setW(e.contentRect.width);
     });
     ro.observe(wrapRef.current);
     return () => ro.disconnect();
   }, []);
-  // Slide ha aspect 16:9 — altezza in px = larghezza * 9/16
-  const containerH = containerW * 9 / 16;
-  // 1 pt = 1/72 inch; slide PPTX e' 7.5in = 540pt di altezza.
-  // Quindi 1pt di font = containerH/540 pixel nella preview.
-  const ptToPx = containerH / 540;
+  const H = W * 9 / 16;
+  // 1pt = 1/72in; SLIDE_H = 7.5in = 540pt. Quindi 1pt = H/540 px.
+  const ptToPx = H / 540;
 
   return (
     <div className="slide-wrap">
       <div className="slide-label">
         <span>Slide {index + 1}</span>
-        {isReady && (
-          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
-            · {slide.textBlocks.length} testi editabili
-          </span>
-        )}
-        {isError && (
-          <span style={{ color: 'var(--error)', fontWeight: 600 }}>
-            · errore: {slide.error}
-          </span>
-        )}
+        <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
+          · {slide.textBlocks.length} testi editabili
+        </span>
       </div>
 
-      <div ref={wrapRef} className="slide-canvas-wrap" style={{ background: isReady ? '#FFFFFF' : '#000' }}>
-        {!isReady && (
-          <img className="slide-bg-img" src={slide.origDataUrl}
-            alt={`Slide ${index + 1}`} draggable={false} />
-        )}
-
-        {isReady && (
-          <div className="slide-overlay">
-            {slide.textBlocks.map((tb, bi) => (
-              <div key={bi} contentEditable suppressContentEditableWarning
-                className="editable-text-block"
-                style={{
-                  left: `${(tb.x || 0) * 100}%`,
-                  top: `${(tb.y || 0) * 100}%`,
-                  width: `${Math.max(2, (tb.w || 0) * 100)}%`,
-                  minHeight: `${Math.max(1.5, (tb.h || 0) * 100)}%`,
-                  fontSize: `${Math.max(11, (tb.fontSize || 16) * ptToPx).toFixed(1)}px`,
-                  fontWeight: tb.bold ? 700 : 400,
-                  textAlign: tb.align || 'left',
-                  fontFamily: tb.fontFamily || 'Arial, sans-serif',
-                }}
-                onBlur={(e) => onUpdateText(bi, e.currentTarget.innerText)}
-                dangerouslySetInnerHTML={{
-                  __html: ((slide.edited[bi] !== undefined ? slide.edited[bi] : (tb.text || ''))
-                    || '(vuoto)').replace(/\n/g, '<br>'),
-                }} />
-            ))}
-          </div>
-        )}
-
-        {(isPristine || isError) && (
-          <div className="slide-actions">
-            <button className="btn btn-primary" onClick={onExtract} disabled={isExtracting}>
-              <IconEdit /> {isError ? 'Riprova estrazione' : 'Estrai testi'}
-            </button>
-          </div>
-        )}
-
-        {isExtracting && (
-          <div className="slide-actions">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div className="spinner" />
-              <span style={{ fontSize: 13 }}>Sto estraendo i testi...</span>
-            </div>
-          </div>
-        )}
+      <div ref={wrapRef} className="slide-canvas-wrap">
+        {slide.textBlocks.map((tb, bi) => (
+          <div key={bi} contentEditable suppressContentEditableWarning
+            className="editable-text-block"
+            style={{
+              left: `${(tb.x || 0) * 100}%`,
+              top: `${(tb.y || 0) * 100}%`,
+              width: `${Math.max(2, (tb.w || 0) * 100)}%`,
+              minHeight: `${Math.max(1.5, (tb.h || 0) * 100)}%`,
+              fontSize: `${Math.max(11, (tb.fontSize || 14) * ptToPx).toFixed(1)}px`,
+              fontWeight: tb.bold ? 700 : 400,
+              fontStyle: tb.italic ? 'italic' : 'normal',
+              textAlign: tb.align || 'left',
+              fontFamily: 'Arial, sans-serif',
+            }}
+            onBlur={(e) => onUpdateText(bi, e.currentTarget.innerText)}
+            dangerouslySetInnerHTML={{
+              __html: ((slide.edited[bi] !== undefined ? slide.edited[bi] : (tb.text || ''))
+                || '(vuoto)').replace(/\n/g, '<br>'),
+            }} />
+        ))}
       </div>
     </div>
   );
