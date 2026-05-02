@@ -119,9 +119,10 @@ export async function POST(request) {
     // Check for API key
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
+      console.error('[/api/analyze] OPENROUTER_API_KEY missing in env. Configure it on Vercel for the Preview/Production environment in use.');
       return new Response(
         JSON.stringify({
-          error: 'Server configuration error: OpenRouter API key not set'
+          error: 'OPENROUTER_API_KEY non configurata su Vercel per questo environment (Preview/Production).'
         }),
         {
           status: 500,
@@ -286,10 +287,11 @@ export async function POST(request) {
     );
 
   } catch (error) {
-    console.error('Unexpected error in /api/analyze:', error);
+    console.error('[/api/analyze] Unexpected error:', error?.stack || error);
     return new Response(
       JSON.stringify({
-        error: 'Internal server error'
+        error: 'Internal server error',
+        details: (error && (error.message || String(error))).slice(0, 300),
       }),
       {
         status: 500,
