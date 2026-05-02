@@ -254,6 +254,116 @@ export function validateResponse(response) {
   return { valid: true, normalized: { textBlocks, imageRegions }, warnings };
 }
 
+/**
+ * Use Gemini 2.5 Flash Image (Nano Banana) to erase all text from a slide.
+ * Sends the slide image with a prompt to remove text and reconstruct the background.
+ * Returns a base64 data URL of the cleaned image.
+ *
+ * @param {string} apiKey - OpenRouter API key
+ * @param {string} dataUrl - base64 image data URL of the slide
+ * @returns {Promise<string>} - base64 data URL of the cleaned image
+ */
+export async function eraseTextWithAI(apiKey, dataUrl, mode = 'text') {
+  if (!apiKey) throw new Error('OpenRouter API key not provided');
+  if (!dataUrl) throw new Error('Image data URL not provided');
 
-// NOTA: eraseTextWithAI (inpainting Gemini) rimossa. Sostituita da clientSideInpaint
-// in src/components/Editor.jsx (canvas, deterministico, offline).
+  const PROMPTS = {
+    text: `Remove ALL text from this presentation slide image.
+Erase every piece of text (titles, subtitles, body text, bullet points, numbers, labels, captions, footnotes) and reconstruct the background behind it seamlessly.
+Keep all non-text elements INTACT: photos, icons, charts, diagrams, logos, shapes, lines, decorative elements, background colors and gradients.
+The result should look like the original slide but with no readable text anywhere — only the visual/graphic elements remain.
+Return ONLY the cleaned image, no text response.`,
+    all: `Remove ALL text AND all visual elements (charts, graphs, diagrams, icons, logos, infographics, photos) from this presentation slide image.
+Erase everything and reconstruct the background behind it seamlessly — keep only the background color, gradients, and decorative patterns.
+The result should be a clean empty slide background with no text, no images, no charts, no icons — just the underlying background.
+Return ONLY the cleaned image, no text response.`,
+  };
+
+  const INPAINT_PROMPT = PROMPTS[mode] || PROMPTS.text;
+
+  let lastError = null;
+  let data = null;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = Math.min(INITIAL_DELAY * Math.pow(2, attempt - 1), MAX_DELAY);
+      await new Promise(r => setTimeout(r, delay));
+    }
+
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://slideforge.app',
+          'X-Title': 'SlideForge',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash-image',
+          modalities: ['image', 'text'],
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: INPAINT_PROMPT },
+              { type: 'image_url', image_url: { url: dataUrl } }
+            ]
+          }],
+          temperature: 0.2,
+        })
+      });
+
+      if (response.status === 429 || response.status === 503) {
+        lastError = new Error(`Rate limited (${response.status})`);
+        continue;
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`AI inpainting error (${response.status}): ${errorText.substring(0, 300)}`);
+      }
+
+      data = await response.json();
+      break;
+
+    } catch (error) {
+      lastError = error;
+      if (attempt === MAX_RETRIES - 1) {
+        throw new Error(`Inpainting failed after ${MAX_RETRIES} attempts: ${lastError.message}`);
+      }
+    }
+  }
+
+  if (!data) throw lastError || new Error('AI inpainting failed');
+  const msg = data.choices?.[0]?.message;
+
+  // OpenRouter returns images as base64 data URLs in various locations
+  // 1. In message.images array (Gemini image models with modalities=["image","text"])
+  if (Array.isArray(msg?.images) && msg.images.length > 0) {
+    const img = msg.images[0];
+    if (typeof img === 'string') return img;
+    if (img?.image_url?.url) return img.image_url.url;
+    if (img?.url) return img.url;
+  }
+
+  // 2. In content as string (direct base64)
+  if (typeof msg?.content === 'string' && msg.content.startsWith('data:image/')) {
+    return msg.content;
+  }
+
+  // 3. In content as array of parts
+  if (Array.isArray(msg?.content)) {
+    for (const part of msg.content) {
+      if (part.type === 'image_url' && part.image_url?.url) return part.image_url.url;
+      if (typeof part === 'string' && part.startsWith('data:image/')) return part;
+    }
+  }
+
+  // 4. Check data.images directly (some providers)
+  if (Array.isArray(data.images) && data.images.length > 0) {
+    return data.images[0];
+  }
+
+  console.error('[inpaint] No image found. Full response:', JSON.stringify(data).substring(0, 800));
+  throw new Error('AI inpainting returned no image');
+}

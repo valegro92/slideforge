@@ -91,17 +91,6 @@ const STYLES = `
     color: var(--accent);
   }
 
-  .btn-secondary {
-    background: rgba(45, 212, 168, 0.12);
-    border: 1px solid rgba(45, 212, 168, 0.4);
-    color: var(--accent);
-    font-weight: 600;
-  }
-  .btn-secondary:hover:not(:disabled) {
-    background: rgba(45, 212, 168, 0.2);
-    border-color: var(--accent);
-  }
-
   .btn-sm {
     padding: 6px 12px;
     font-size: 12px;
@@ -640,6 +629,18 @@ const IconText = () => (
   </svg>
 );
 
+const IconPhoto = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+  </svg>
+);
+
+const IconCheck = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12"/>
+  </svg>
+);
+
 const IconDownload = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
@@ -649,6 +650,12 @@ const IconDownload = () => (
 const IconUpload = () => (
   <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+  </svg>
+);
+
+const IconSelectAll = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
   </svg>
 );
 
@@ -679,75 +686,6 @@ function loadPdfJs() {
   return pdfJsPromise;
 }
 
-// ─── Tesseract.js loader ─────────────────────────────────────────────────────
-// OCR client-side: estrae testi con bbox precisi pixel-per-pixel.
-// Deterministico, gratis, no API. Sostituisce OpenRouter Vision per il flow
-// editing: l'AI Vision dimenticava testi e sbagliava bbox, Tesseract no.
-
-let tesseractPromise = null;
-
-function loadTesseract() {
-  if (tesseractPromise) return tesseractPromise;
-  tesseractPromise = new Promise((resolve, reject) => {
-    if (window.Tesseract) { resolve(window.Tesseract); return; }
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    script.onload = () => {
-      if (window.Tesseract) resolve(window.Tesseract);
-      else reject(new Error('Tesseract not found after load'));
-    };
-    script.onerror = () => reject(new Error('Could not load Tesseract'));
-    document.head.appendChild(script);
-  });
-  return tesseractPromise;
-}
-
-let tesseractWorker = null;
-
-async function getTesseractWorker() {
-  if (tesseractWorker) return tesseractWorker;
-  const Tesseract = await loadTesseract();
-  tesseractWorker = await Tesseract.createWorker(['ita', 'eng']);
-  return tesseractWorker;
-}
-
-/**
- * Estrae testi da un'immagine via Tesseract OCR.
- * Restituisce textBlocks normalizzati (0-1) compatibili col formato esistente.
- */
-async function runOcr(imageDataUrl) {
-  const worker = await getTesseractWorker();
-  const { data } = await worker.recognize(imageDataUrl);
-  const lines = data.lines || [];
-
-  const img = await loadImage(imageDataUrl);
-  const W = img.naturalWidth;
-  const H = img.naturalHeight;
-
-  return lines
-    .filter(l => l.text && l.text.trim().length > 0 && (l.confidence ?? 100) > 30)
-    .map(l => {
-      const bx = l.bbox.x0 || 0;
-      const by = l.bbox.y0 || 0;
-      const bw = (l.bbox.x1 - l.bbox.x0) || 0;
-      const bh = (l.bbox.y1 - l.bbox.y0) || 0;
-      // Stimo fontSize dal bbox altezza: SLIDE_H = 7.5in = 540pt
-      const fontSize = Math.max(8, Math.min(72, Math.round((bh / H) * 540 * 0.75)));
-      return {
-        text: l.text.replace(/\n/g, ' ').trim(),
-        x: bx / W,
-        y: by / H,
-        w: bw / W,
-        h: bh / H,
-        fontSize,
-        color: '#222222',
-        bold: false,
-        align: 'left',
-        fontFamily: 'Arial',
-      };
-    });
-}
-
 // ─── PptxGenJS loader ────────────────────────────────────────────────────────
 
 let pptxPromise = null;
@@ -768,277 +706,6 @@ function loadPptxGen() {
   return pptxPromise;
 }
 
-// ─── Client-side inpainting (canvas) ─────────────────────────────────────────
-//
-// Why: the AI Vision bounding boxes for textBlocks are NEVER pixel-perfect.
-// Even with generous padding, a fixed-color rect (e.g. white) leaves the
-// original text visible AROUND the box on colored backgrounds, producing the
-// dreaded "double text" effect in the exported PPTX.
-//
-// Strategy: sample the average background color from a thin frame of pixels
-// just OUTSIDE each text bounding box, then paint a generously-padded rect
-// of that color OVER the text region. Result: the text disappears into its
-// own background — works on white, colored, gradient, and even photo
-// backgrounds (degrades gracefully to a sampled solid color).
-//
-// 100% client-side, no API call, deterministic, free.
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
-// Sample average color from a thin frame around a rect (in pixel coords).
-// We sample only pixels OUTSIDE the inner rect but WITHIN the outer frame.
-// Returns { r, g, b } as 0-255 ints, or null if no samples.
-function sampleBorderColor(ctx, x, y, w, h, frameThickness, imgW, imgH) {
-  const x0 = Math.max(0, Math.floor(x));
-  const y0 = Math.max(0, Math.floor(y));
-  const x1 = Math.min(imgW, Math.ceil(x + w));
-  const y1 = Math.min(imgH, Math.ceil(y + h));
-
-  // Outer frame box (clamped to image)
-  const fx0 = Math.max(0, x0 - frameThickness);
-  const fy0 = Math.max(0, y0 - frameThickness);
-  const fx1 = Math.min(imgW, x1 + frameThickness);
-  const fy1 = Math.min(imgH, y1 + frameThickness);
-
-  if (fx1 <= fx0 || fy1 <= fy0) return null;
-
-  let imageData;
-  try {
-    imageData = ctx.getImageData(fx0, fy0, fx1 - fx0, fy1 - fy0);
-  } catch (e) {
-    // Tainted canvas (cross-origin) — unlikely since we draw a same-origin dataURL
-    return null;
-  }
-  const data = imageData.data;
-  const fW = fx1 - fx0;
-
-  // Inner rect coords RELATIVE to frame
-  const ix0 = x0 - fx0;
-  const iy0 = y0 - fy0;
-  const ix1 = x1 - fx0;
-  const iy1 = y1 - fy0;
-
-  // Collect samples and use median per channel — robust to outliers (text glyphs
-  // that may bleed slightly into the frame, or anti-aliased edges).
-  const rs = [], gs = [], bs = [];
-  // Step to keep sampling cheap on large boxes
-  const step = Math.max(1, Math.floor(Math.min(fW, fy1 - fy0) / 80));
-
-  for (let py = 0; py < fy1 - fy0; py += step) {
-    for (let px = 0; px < fW; px += step) {
-      // Skip pixels that fall INSIDE the inner rect (those are the text region)
-      if (px >= ix0 && px < ix1 && py >= iy0 && py < iy1) continue;
-      const i = (py * fW + px) * 4;
-      const a = data[i + 3];
-      if (a < 200) continue;
-      rs.push(data[i]);
-      gs.push(data[i + 1]);
-      bs.push(data[i + 2]);
-    }
-  }
-
-  if (rs.length === 0) return null;
-
-  // Median (robust to dark text pixels that leak into the frame)
-  const median = (arr) => {
-    arr.sort((a, b) => a - b);
-    return arr[Math.floor(arr.length / 2)];
-  };
-
-  return { r: median(rs), g: median(gs), b: median(bs) };
-}
-
-function rgbToHex({ r, g, b }) {
-  const h = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
-  return `${h(r)}${h(g)}${h(b)}`.toUpperCase();
-}
-
-/**
- * Erase text from an image client-side by painting background-color rects
- * over each detected text box.
- *
- * @param {string} origDataUrl - source image data URL
- * @param {Array} textBlocks - normalized (0-1) bounding boxes
- * @param {Set<number>} keepIndices - indices of blocks to erase (only erase blocks the user kept)
- * @returns {Promise<{ dataUrl: string, blockColors: Array<string|null> }>}
- *   blockColors[i] is the sampled hex (no '#') for block i, or null if not erased.
- */
-/**
- * Smart text removal: per ogni text-block, identifica i pixel "diversi dallo
- * sfondo" (= il testo) e li sostituisce col colore di sfondo dominante della
- * zona. Mantiene il pattern decorato (strisce, gradienti) intorno al testo.
- *
- * Algoritmo:
- *   1. Per ogni bbox espanso del 8%, leggi i pixel.
- *   2. Calcola il colore "background" dominante (mediana dei pixel piu' chiari
- *      = sfondo, escludendo i piu' scuri = inchiostro/testo).
- *   3. Per ogni pixel, se la sua distanza dal background supera una soglia,
- *      sostituiscilo col background. Cosi' le lettere spariscono.
- *
- * @param {string} origDataUrl
- * @param {Array} textBlocks normalized bboxes (0-1)
- * @param {Set<number>} keepIndices
- * @returns {Promise<{ dataUrl: string }>}
- */
-async function smartTextRemoval(origDataUrl, textBlocks, keepIndices) {
-  if (!textBlocks || textBlocks.length === 0) {
-    return { dataUrl: origDataUrl };
-  }
-  const img = await loadImage(origDataUrl);
-  const W = img.naturalWidth;
-  const H = img.naturalHeight;
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0);
-
-  const PAD = 0.08; // espansione 8% del bbox per sicurezza
-  const DIST_THRESHOLD = 60; // distanza colore minima per considerare "testo"
-
-  for (let i = 0; i < textBlocks.length; i++) {
-    if (!keepIndices.has(i)) continue;
-    const tb = textBlocks[i];
-    const x0 = (tb.x || 0) * W;
-    const y0 = (tb.y || 0) * H;
-    const w0 = (tb.w || 0) * W;
-    const h0 = (tb.h || 0) * H;
-    const padX = w0 * PAD;
-    const padY = h0 * PAD;
-    const x = Math.max(0, Math.floor(x0 - padX));
-    const y = Math.max(0, Math.floor(y0 - padY));
-    const w = Math.min(W - x, Math.ceil(w0 + padX * 2));
-    const h = Math.min(H - y, Math.ceil(h0 + padY * 2));
-    if (w < 4 || h < 4) continue;
-
-    const region = ctx.getImageData(x, y, w, h);
-    const px = region.data;
-
-    // Step 1: trova il background. Bucketize i pixel per luminosita' (0-255)
-    // e prendi la mediana dei pixel del 60% piu' chiaro (assumendo che il
-    // testo sia piu' scuro dello sfondo, vero quasi sempre).
-    const lumas = [];
-    for (let p = 0; p < px.length; p += 4) {
-      const r = px[p], g = px[p + 1], b = px[p + 2];
-      lumas.push((r * 0.299 + g * 0.587 + b * 0.114) | 0);
-    }
-    lumas.sort((a, b) => a - b);
-    const lightThreshold = lumas[Math.floor(lumas.length * 0.4)] || 128;
-
-    // Mediana dei canali R,G,B sui pixel "chiari" → colore di sfondo
-    const bgR = [], bgG = [], bgB = [];
-    for (let p = 0; p < px.length; p += 4) {
-      const r = px[p], g = px[p + 1], b = px[p + 2];
-      const lum = r * 0.299 + g * 0.587 + b * 0.114;
-      if (lum >= lightThreshold) {
-        bgR.push(r); bgG.push(g); bgB.push(b);
-      }
-    }
-    if (bgR.length === 0) continue;
-    bgR.sort((a, b) => a - b);
-    bgG.sort((a, b) => a - b);
-    bgB.sort((a, b) => a - b);
-    const mid = bgR.length >> 1;
-    const bg = { r: bgR[mid], g: bgG[mid], b: bgB[mid] };
-
-    // Step 2: sostituisci i pixel troppo "scuri" con il bg.
-    // Manhattan distance per velocita'.
-    for (let p = 0; p < px.length; p += 4) {
-      const dr = Math.abs(px[p] - bg.r);
-      const dg = Math.abs(px[p + 1] - bg.g);
-      const db = Math.abs(px[p + 2] - bg.b);
-      if (dr + dg + db > DIST_THRESHOLD) {
-        px[p] = bg.r;
-        px[p + 1] = bg.g;
-        px[p + 2] = bg.b;
-      }
-    }
-    ctx.putImageData(region, x, y);
-  }
-
-  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92) };
-}
-
-async function clientSideInpaint(origDataUrl, textBlocks, keepIndices, opts = {}) {
-  // Modalita' "solo testo": sfondo completamente bianco, niente immagine originale.
-  // Garantisce zero residui per slide complesse (pattern, sfondi colorati).
-  if (opts.whiteOnly) {
-    const imgWhite = await loadImage(origDataUrl);
-    const cWhite = document.createElement('canvas');
-    cWhite.width = imgWhite.naturalWidth;
-    cWhite.height = imgWhite.naturalHeight;
-    const cx = cWhite.getContext('2d');
-    cx.fillStyle = '#FFFFFF';
-    cx.fillRect(0, 0, cWhite.width, cWhite.height);
-    return { dataUrl: cWhite.toDataURL('image/jpeg', 0.92), blockColors: [] };
-  }
-
-  if (!textBlocks || textBlocks.length === 0) {
-    return { dataUrl: origDataUrl, blockColors: [] };
-  }
-  const img = await loadImage(origDataUrl);
-  const W = img.naturalWidth;
-  const H = img.naturalHeight;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0);
-
-  const blockColors = new Array(textBlocks.length).fill(null);
-
-  // Frame piu' generoso per campionare lontano dal testo (descender/ascender,
-  // pattern grafici incollati, ecc.).
-  const samples = textBlocks.map((tb, i) => {
-    if (!keepIndices.has(i)) return null;
-    const x = (tb.x || 0) * W;
-    const y = (tb.y || 0) * H;
-    const w = Math.max(2, (tb.w || 0.02) * W);
-    const h = Math.max(2, (tb.h || 0.02) * H);
-    const frame = Math.max(10, Math.min(80, Math.round(h * 1.2)));
-    const color = sampleBorderColor(ctx, x, y, w, h, frame, W, H);
-    return { x, y, w, h, color };
-  });
-
-  // Padding aggressivo per coprire i bbox imprecisi della AI Vision: il testo
-  // spesso sfugge sopra/sotto/lateralmente. Su slide dense (NotebookLM con
-  // tabelle/elenchi) servono valori molto generosi per evitare residui.
-  const PAD_X_FRAC = 0.25;
-  const PAD_Y_FRAC = 0.80;
-  const MIN_PAD_PX = 12;
-
-  for (let i = 0; i < samples.length; i++) {
-    const s = samples[i];
-    if (!s) continue;
-    const fillRgb = s.color || { r: 255, g: 255, b: 255 };
-    blockColors[i] = rgbToHex(fillRgb);
-
-    const padX = Math.max(MIN_PAD_PX, s.w * PAD_X_FRAC);
-    const padY = Math.max(MIN_PAD_PX, s.h * PAD_Y_FRAC);
-
-    const px = Math.max(0, s.x - padX);
-    const py = Math.max(0, s.y - padY);
-    const pw = Math.min(W - px, s.w + padX * 2);
-    const ph = Math.min(H - py, s.h + padY * 2);
-
-    ctx.fillStyle = `rgb(${fillRgb.r}, ${fillRgb.g}, ${fillRgb.b})`;
-    ctx.fillRect(px, py, pw, ph);
-  }
-
-  // JPEG keeps file size sane (PPTX-friendly); quality 0.92 preserves background gradients.
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-  return { dataUrl, blockColors };
-}
-
 // ─── createSlideState helper ─────────────────────────────────────────────────
 
 function createSlideState(origDataUrl, width, height) {
@@ -1056,7 +723,7 @@ function createSlideState(origDataUrl, width, height) {
     },
     grabbedTextIndices: new Set(),
     grabbedImageIndices: new Set(),
-    editedTexts: {},
+    editedTexts: {}, // { blockIndex: "edited text" }
   };
 }
 
@@ -1074,7 +741,6 @@ export default function Editor({ onReset }) {
   const [fileName, setFileName] = useState('');
   const [exportError, setExportError] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [batchProgress, setBatchProgress] = useState({ active: false, done: 0, total: 0 });
 
   const fileInputRef = useRef(null);
 
@@ -1155,83 +821,153 @@ export default function Editor({ onReset }) {
 
     try {
       const slide = slides[slideIndex];
+      const resp = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: slide.origDataUrl, tier, email: user?.email })
+      });
 
-      // OCR client-side: estrae ogni riga di testo con bbox preciso pixel
-      // per pixel. Sostituisce OpenRouter Vision (che dimenticava testi e
-      // sbagliava bbox). Tesseract e' deterministico, completo, gratis.
-      const textBlocks = await runOcr(slide.origDataUrl);
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || `Errore AI (${resp.status})`);
+      }
 
-      if (textBlocks.length === 0) {
-        setSlides(prev => {
-          const next = [...prev];
-          next[slideIndex] = {
-            ...next[slideIndex],
-            mode: 'pristine',
-            detection: {
-              status: 'error',
-              error: 'Nessun testo rilevato in questa slide.',
-              textBlocks: [],
-              imageRegions: [],
-            },
-          };
-          return next;
-        });
-        return;
+      const data = await resp.json();
+      const textBlocks = Array.isArray(data.textBlocks) ? data.textBlocks : [];
+      const imageRegions = Array.isArray(data.imageRegions) ? data.imageRegions : [];
+
+      setSlides(prev => {
+        const next = [...prev];
+        next[slideIndex] = {
+          ...next[slideIndex],
+          mode: 'detected',
+          detection: { status: 'done', error: null, textBlocks, imageRegions },
+          grabbedTextIndices: new Set(textBlocks.map((_, i) => i)),
+          grabbedImageIndices: new Set(imageRegions.map((_, i) => i)),
+        };
+        return next;
+      });
+    } catch (err) {
+      setSlides(prev => {
+        const next = [...prev];
+        next[slideIndex] = {
+          ...next[slideIndex],
+          detection: { ...next[slideIndex].detection, status: 'error', error: err.message }
+        };
+        return next;
+      });
+    }
+  }, [slides, tier]);
+
+  // ── Toggle individual block selection ────────────────────────────────────
+
+  const toggleTextBlock = useCallback((slideIndex, blockIndex) => {
+    setSlides(prev => {
+      const next = [...prev];
+      const slide = { ...next[slideIndex] };
+      const grabbed = new Set(slide.grabbedTextIndices);
+      if (grabbed.has(blockIndex)) grabbed.delete(blockIndex);
+      else grabbed.add(blockIndex);
+      slide.grabbedTextIndices = grabbed;
+      next[slideIndex] = slide;
+      return next;
+    });
+  }, []);
+
+  const toggleImageBlock = useCallback((slideIndex, blockIndex) => {
+    setSlides(prev => {
+      const next = [...prev];
+      const slide = { ...next[slideIndex] };
+      const grabbed = new Set(slide.grabbedImageIndices);
+      if (grabbed.has(blockIndex)) grabbed.delete(blockIndex);
+      else grabbed.add(blockIndex);
+      slide.grabbedImageIndices = grabbed;
+      next[slideIndex] = slide;
+      return next;
+    });
+  }, []);
+
+  // ── Select all for a slide ────────────────────────────────────────────────
+
+  const selectAll = useCallback((slideIndex) => {
+    setSlides(prev => {
+      const next = [...prev];
+      const slide = { ...next[slideIndex] };
+      const det = slide.detection;
+      slide.grabbedTextIndices = new Set(det.textBlocks.map((_, i) => i));
+      slide.grabbedImageIndices = new Set(det.imageRegions.map((_, i) => i));
+      next[slideIndex] = slide;
+      return next;
+    });
+  }, []);
+
+  // ── Set slide mode ────────────────────────────────────────────────────────
+
+  const setSlideMode = useCallback((slideIndex, mode) => {
+    setSlides(prev => {
+      const next = [...prev];
+      next[slideIndex] = { ...next[slideIndex], mode };
+      return next;
+    });
+  }, []);
+
+  // ── Acquire text: inpaint slide and enter editing mode ──────────────────
+  // mode: 'text' = acquire text only, 'all' = acquire text + images
+  const acquireText = useCallback(async (slideIndex, inpaintMode = 'text') => {
+    // Set processing mode
+    setSlides(prev => {
+      const next = [...prev];
+      next[slideIndex] = { ...next[slideIndex], mode: 'processing' };
+      return next;
+    });
+
+    try {
+      const slide = slides[slideIndex];
+      const resp = await fetch('/api/inpaint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: slide.origDataUrl, mode: inpaintMode, email: user?.email }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Inpainting fallito');
+      }
+
+      const data = await resp.json();
+      if (!data.cleanedImage) throw new Error('Nessuna immagine ricevuta');
+
+      // Extract the data URL from the response (could be string or object)
+      let cleanedUrl = data.cleanedImage;
+      if (typeof cleanedUrl === 'object' && cleanedUrl.image_url?.url) {
+        cleanedUrl = cleanedUrl.image_url.url;
       }
 
       setSlides(prev => {
         const next = [...prev];
         next[slideIndex] = {
           ...next[slideIndex],
+          cleanedDataUrl: cleanedUrl,
           mode: 'editing',
-          detection: { status: 'done', error: null, textBlocks, imageRegions: [] },
-          grabbedTextIndices: new Set(textBlocks.map((_, i) => i)),
-          grabbedImageIndices: new Set(),
-          cleanedDataUrl: null,
         };
         return next;
       });
     } catch (err) {
-      console.error('[runDetection] OCR failed:', err);
+      console.error('Acquire text error:', err);
       setSlides(prev => {
         const next = [...prev];
         next[slideIndex] = {
           ...next[slideIndex],
+          mode: 'detected',
           detection: {
             ...next[slideIndex].detection,
-            status: 'error',
-            error: err.message || 'OCR fallito'
-          }
+            error: err.message,
+          },
         };
         return next;
       });
     }
   }, [slides]);
-
-  // ── Batch AI detection: cattura tutte le slide in sequenza ───────────────
-
-  const runDetectionAll = useCallback(async () => {
-    const indices = slides
-      .map((s, i) => ({ s, i }))
-      .filter(({ s }) => s.detection.status !== 'done' && s.detection.status !== 'loading')
-      .map(({ i }) => i);
-
-    if (indices.length === 0) return;
-
-    setBatchProgress({ active: true, done: 0, total: indices.length });
-
-    for (let k = 0; k < indices.length; k++) {
-      try {
-        await runDetection(indices[k]);
-      } catch (err) {
-        console.error('Batch detection failed for slide', indices[k], err);
-        // Continua con le altre anche se una fallisce
-      }
-      setBatchProgress(p => ({ ...p, done: k + 1 }));
-    }
-
-    setBatchProgress({ active: false, done: 0, total: 0 });
-  }, [slides, runDetection]);
 
   // ── Update edited text for a block ──────────────────────────────────────
   const updateBlockText = useCallback((slideIndex, blockIndex, newText) => {
@@ -1256,32 +992,85 @@ export default function Editor({ onReset }) {
 
     for (const slide of slideSubset) {
       const pSlide = pptx.addSlide();
-      // Sfondo bianco nativo della slide. NESSUNA immagine. Zero ridondanza.
-      pSlide.background = { color: 'FFFFFF' };
+      const det = slide.detection;
 
-      const textBlocks = slide.detection?.textBlocks || [];
-      const grabbed = slide.grabbedTextIndices || new Set();
+      // CRITICAL: only add text/image elements if inpainting succeeded.
+      // If cleanedDataUrl is null, the original image still has text → no overlay allowed.
+      const hasCleanBg = !!slide.cleanedDataUrl;
+      pSlide.addImage({
+        data: hasCleanBg ? slide.cleanedDataUrl : slide.origDataUrl,
+        x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
+      });
 
-      for (const idx of grabbed) {
-        const tb = textBlocks[idx];
+      // Skip text and image elements if background still has original text
+      if (!hasCleanBg) continue;
+
+      // Image regions: crop from ORIGINAL image and add as separate PPTX elements
+      for (const idx of slide.grabbedImageIndices) {
+        const region = det.imageRegions[idx];
+        if (!region) continue;
+
+        // We need a canvas from the ORIGINAL image (not the cleaned one)
+        const origImg = await new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth;
+            c.height = img.naturalHeight;
+            c.getContext('2d').drawImage(img, 0, 0);
+            resolve(c);
+          };
+          img.src = slide.origDataUrl;
+        });
+
+        const cw = origImg.width, ch = origImg.height;
+        const rx = Math.max(0, Math.round((region.x || 0) * cw));
+        const ry = Math.max(0, Math.round((region.y || 0) * ch));
+        const rw = Math.min(cw - rx, Math.round((region.w || 0) * cw));
+        const rh = Math.min(ch - ry, Math.round((region.h || 0) * ch));
+        if (rw < 4 || rh < 4) continue;
+
+        const crop = document.createElement('canvas');
+        crop.width = rw;
+        crop.height = rh;
+        crop.getContext('2d').drawImage(origImg, rx, ry, rw, rh, 0, 0, rw, rh);
+
+        let ix = Math.max(0, (region.x || 0) * SLIDE_W);
+        let iy = Math.max(0, (region.y || 0) * SLIDE_H);
+        let iw = Math.max(0.1, (region.w || 0.1) * SLIDE_W);
+        let ih = Math.max(0.1, (region.h || 0.1) * SLIDE_H);
+        if (ix + iw > SLIDE_W) iw = SLIDE_W - ix;
+        if (iy + ih > SLIDE_H) ih = SLIDE_H - iy;
+
+        pSlide.addImage({
+          data: crop.toDataURL('image/png'),
+          x: ix, y: iy, w: iw, h: ih,
+        });
+      }
+
+      // Editable text boxes with user-edited text
+      for (const idx of slide.grabbedTextIndices) {
+        const tb = det.textBlocks[idx];
         if (!tb) continue;
 
+        // Use edited text if available, otherwise AI-detected text
         const text = (slide.editedTexts && slide.editedTexts[idx] !== undefined)
           ? slide.editedTexts[idx]
           : (tb.text || '');
-        if (!text) continue;
 
         let tx = Math.max(0, (tb.x || 0) * SLIDE_W);
         let ty = Math.max(0, (tb.y || 0) * SLIDE_H);
-        let tw = Math.max(0.5, (tb.w || 0.1) * SLIDE_W);
-        let th = Math.max(0.25, (tb.h || 0.05) * SLIDE_H);
+        let tw = Math.max(0.1, (tb.w || 0.1) * SLIDE_W);
+        let th = Math.max(0.05, (tb.h || 0.05) * SLIDE_H);
         if (tx + tw > SLIDE_W) tw = SLIDE_W - tx;
         if (ty + th > SLIDE_H) th = SLIDE_H - ty;
 
+        const color = (tb.color || '#333333').replace('#', '').toUpperCase();
+
         pSlide.addText(text, {
           x: tx, y: ty, w: tw, h: th,
-          fontSize: Math.max(8, Math.min(72, tb.fontSize || 14)),
-          color: (tb.color || '#222222').replace('#', '').toUpperCase(),
+          fontSize: Math.max(8, Math.min(72, tb.fontSize || 18)),
+          color,
           bold: tb.bold === true,
           align: tb.align || 'left',
           fontFace: tb.fontFamily || 'Arial',
@@ -1411,22 +1200,9 @@ export default function Editor({ onReset }) {
                 Nuovo PDF
               </button>
               <button
-                className="btn btn-secondary btn-sm"
-                onClick={runDetectionAll}
-                disabled={
-                  batchProgress.active ||
-                  slides.every(s => s.detection.status === 'done')
-                }
-                title="Analizza con AI tutte le slide non ancora processate"
-              >
-                {batchProgress.active
-                  ? `Elaborazione ${batchProgress.done} / ${batchProgress.total}...`
-                  : 'Rendi tutte modificabili'}
-              </button>
-              <button
                 className="btn btn-primary btn-sm"
                 onClick={exportPptx}
-                disabled={!canExport || batchProgress.active}
+                disabled={!canExport}
               >
                 <IconDownload /> Esporta PPTX
               </button>
@@ -1488,7 +1264,13 @@ export default function Editor({ onReset }) {
               slide={slide}
               index={si}
               onDetect={() => runDetection(si)}
+              onToggleText={(bi) => toggleTextBlock(si, bi)}
+              onToggleImage={(bi) => toggleImageBlock(si, bi)}
+              onSelectAll={() => selectAll(si)}
+              onSetMode={(mode) => setSlideMode(si, mode)}
               onExportSlide={() => exportSlide(si)}
+              onAcquireText={() => acquireText(si, 'text')}
+              onAcquireAll={() => acquireText(si, 'all')}
               onUpdateText={(bi, text) => updateBlockText(si, bi, text)}
             />
           ))}
@@ -1554,41 +1336,140 @@ function UploadZone({ isDragOver, onDragOver, onDragLeave, onDrop, onClick, maxP
 
 // ─── SlideCard sub-component ──────────────────────────────────────────────────
 
-function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
-  const { origDataUrl, detection, grabbedTextIndices, mode, exporting } = slide;
+function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSelectAll, onSetMode, onExportSlide, onAcquireText, onAcquireAll, onUpdateText }) {
+  const { origDataUrl, detection, grabbedTextIndices, grabbedImageIndices, mode, exporting } = slide;
   const det = detection;
   const isLoading = det.status === 'loading';
+  const isDone = det.status === 'done';
   const isError = det.status === 'error';
 
+  const totalText = isDone ? det.textBlocks.length : 0;
+  const totalImages = isDone ? det.imageRegions.length : 0;
+  const totalBlocks = totalText + totalImages;
+  const totalGrabbed = grabbedTextIndices.size + grabbedImageIndices.size;
+
+  // mode === 'pristine': show toolbar with Cattura buttons
+  // mode === 'detected': show results overlay + primary actions
+  // mode === 'selecting': show manual selection mode
+  // mode === 'processing': AI is removing text (inpainting)
+  // mode === 'editing': show cleaned background with editable text blocks
+
   const isPristine = mode === 'pristine';
+  const isDetected = mode === 'detected';
+  const isSelecting = mode === 'selecting';
+  const isProcessing = mode === 'processing';
   const isEditing = mode === 'editing';
-  const numText = (det.textBlocks || []).length;
 
   return (
     <div className="slide-wrap">
       <div className="slide-label">
         Slide {index + 1}
+        {isDetected && totalBlocks > 0 && (
+          <span style={{ marginLeft: 8, color: 'var(--accent)', fontWeight: 600 }}>
+            · pronto per l'export
+          </span>
+        )}
+        {isSelecting && (
+          <span style={{ marginLeft: 8, color: 'var(--text-dim)', fontWeight: 500 }}>
+            · {totalGrabbed} / {totalBlocks} selezionat{totalGrabbed !== 1 ? 'i' : 'o'}
+          </span>
+        )}
+        {isProcessing && (
+          <span style={{ marginLeft: 8, color: 'var(--text-dim)', fontWeight: 500 }}>
+            · elaborazione...
+          </span>
+        )}
         {isEditing && (
           <span style={{ marginLeft: 8, color: 'var(--accent)', fontWeight: 600 }}>
-            · modalità modifica · {numText} test{numText === 1 ? 'o' : 'i'}
+            · modalità modifica
           </span>
         )}
       </div>
 
-      <div className="slide-canvas-wrap" style={isEditing ? { background: '#FFFFFF' } : undefined}>
-        {/* Background:
-            - editing: sfondo bianco puro (no immagine, no overlay)
-            - pristine: anteprima del PDF originale */}
-        {!isEditing && (
-          <img
-            className="slide-bg-img"
-            src={origDataUrl}
-            alt={`Slide ${index + 1}`}
-            draggable={false}
-          />
+      <div className="slide-canvas-wrap">
+        {/* Background image */}
+        <img className="slide-bg-img" src={isEditing && slide.cleanedDataUrl ? slide.cleanedDataUrl : origDataUrl} alt={`Slide ${index + 1}`} draggable={false} />
+
+        {/* Detected mode: visible highlight overlay (non-interactive) */}
+        {isDetected && isDone && (
+          <div className="slide-overlay">
+            {det.textBlocks.map((tb, bi) => (
+              <div
+                key={`t${bi}`}
+                className="detected-block"
+                style={{
+                  left: `${(tb.x || 0) * 100}%`,
+                  top: `${(tb.y || 0) * 100}%`,
+                  width: `${(tb.w || 0) * 100}%`,
+                  height: `${(tb.h || 0) * 100}%`,
+                }}
+              />
+            ))}
+            {det.imageRegions.map((ir, bi) => (
+              <div
+                key={`i${bi}`}
+                className="detected-img-block"
+                style={{
+                  left: `${(ir.x || 0) * 100}%`,
+                  top: `${(ir.y || 0) * 100}%`,
+                  width: `${(ir.w || 0) * 100}%`,
+                  height: `${(ir.h || 0) * 100}%`,
+                }}
+              />
+            ))}
+          </div>
         )}
 
-        {/* Editing mode: text-block editabili su sfondo bianco */}
+        {/* Selecting mode: clickable toggle blocks */}
+        {isSelecting && isDone && (
+          <div className="slide-overlay">
+            {det.textBlocks.map((tb, bi) => (
+              <div
+                key={`t${bi}`}
+                className={`select-block ${grabbedTextIndices.has(bi) ? 'included' : 'excluded'}`}
+                style={{
+                  left: `${(tb.x || 0) * 100}%`,
+                  top: `${(tb.y || 0) * 100}%`,
+                  width: `${(tb.w || 0) * 100}%`,
+                  height: `${(tb.h || 0) * 100}%`,
+                }}
+                onClick={() => onToggleText(bi)}
+                title={tb.text ? tb.text.substring(0, 80) : 'Blocco testo'}
+              />
+            ))}
+            {det.imageRegions.map((ir, bi) => (
+              <div
+                key={`i${bi}`}
+                className={`select-img-block ${grabbedImageIndices.has(bi) ? 'included' : 'excluded'}`}
+                style={{
+                  left: `${(ir.x || 0) * 100}%`,
+                  top: `${(ir.y || 0) * 100}%`,
+                  width: `${(ir.w || 0) * 100}%`,
+                  height: `${(ir.h || 0) * 100}%`,
+                }}
+                onClick={() => onToggleImage(bi)}
+                title="Regione immagine"
+              >
+                {grabbedImageIndices.has(bi) && (
+                  <span className="select-img-badge">IMG</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Processing overlay — AI is removing text */}
+        {isProcessing && (
+          <div className="processing-overlay">
+            <div className="spinner-large" />
+            <span>Elaborazione in corso...</span>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)', fontWeight: 400 }}>
+              L'AI sta rimuovendo il testo dall'immagine
+            </span>
+          </div>
+        )}
+
+        {/* Editing mode: editable text blocks on cleaned background */}
         {isEditing && (
           <div className="slide-overlay" style={{ pointerEvents: 'auto' }}>
             {det.textBlocks.map((tb, bi) => (
@@ -1636,18 +1517,56 @@ function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
           </div>
         )}
 
-        {/* Pristine toolbar: un singolo click → AI + inpaint + editing */}
+        {/* Results banner — shown in detected and selecting modes */}
+        {(isDetected || isSelecting) && isDone && totalBlocks > 0 && (
+          <div className="results-banner">
+            {totalText > 0 && (
+              <span>
+                {totalText} blocch{totalText !== 1 ? 'i' : 'o'} di testo
+              </span>
+            )}
+            {totalText > 0 && totalImages > 0 && (
+              <div className="results-banner-sep" />
+            )}
+            {totalImages > 0 && (
+              <span className="results-banner-img">
+                {totalImages} immagin{totalImages !== 1 ? 'i' : 'e'}
+              </span>
+            )}
+            {isSelecting && (
+              <>
+                <div className="results-banner-sep" />
+                <span style={{ color: 'var(--text-dim)', fontWeight: 500, fontSize: 12 }}>
+                  {totalGrabbed} / {totalBlocks} sel.
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Pristine toolbar: Cattura testo / Cattura immagini */}
         {isPristine && (
           <div className="slide-toolbar">
             <button
               className={`tb-btn${isLoading ? ' loading' : ''}`}
               onClick={!isLoading ? onDetect : undefined}
               disabled={isLoading}
-              title="Analizza testo, pulisci lo sfondo e rendi modificabile in un click"
-              style={{ minWidth: 200 }}
+              title="Analizza testo e immagini con AI"
             >
               {isLoading ? <div className="spinner" /> : <IconText />}
-              {isLoading ? 'Elaborazione...' : 'Rendi modificabile'}
+              {isLoading ? 'Analisi...' : 'Cattura testo'}
+            </button>
+
+            <div className="toolbar-divider" />
+
+            <button
+              className={`tb-btn${isLoading ? ' loading' : ''}`}
+              onClick={!isLoading ? onDetect : undefined}
+              disabled={isLoading}
+              title="Analizza immagini con AI"
+            >
+              {isLoading ? <div className="spinner" /> : <IconPhoto />}
+              {isLoading ? 'Analisi...' : 'Cattura immagini'}
             </button>
 
             {isError && (
@@ -1665,6 +1584,51 @@ function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
                 </button>
               </>
             )}
+          </div>
+        )}
+
+        {/* Detected mode actions: Acquisisci testo / Acquisisci immagini / Seleziona */}
+        {isDetected && isDone && totalBlocks > 0 && (
+          <div className="slide-actions">
+            <button
+              className="btn-download-slide"
+              onClick={onAcquireText}
+            >
+              <IconText /> Acquisisci testo
+            </button>
+            <button
+              className="btn-download-slide"
+              onClick={onAcquireAll}
+              style={{ background: '#63a5d4', boxShadow: '0 4px 16px rgba(99,165,212,0.35)' }}
+            >
+              <IconPhoto /> Acquisisci immagini
+            </button>
+            <button
+              className="btn-select-manual"
+              onClick={() => onSetMode('selecting')}
+            >
+              Seleziona
+            </button>
+          </div>
+        )}
+
+        {/* Selecting mode actions */}
+        {isSelecting && isDone && (
+          <div className="slide-actions">
+            <button
+              className="btn-select-back"
+              onClick={() => { onSelectAll(); onSetMode('detected'); }}
+            >
+              Annulla
+            </button>
+            <button
+              className="btn-download-slide"
+              onClick={onAcquireText}
+              disabled={totalGrabbed === 0}
+            >
+              <IconText />
+              {totalGrabbed === 0 ? 'Nessun elemento' : `Acquisisci testo (${totalGrabbed})`}
+            </button>
           </div>
         )}
 
@@ -1687,6 +1651,17 @@ function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
           </div>
         )}
 
+        {/* No-results state in detected mode */}
+        {(isDetected || isSelecting) && isDone && totalBlocks === 0 && (
+          <div className="slide-actions">
+            <span style={{ fontSize: 13, color: 'var(--text-dim)', background: 'rgba(20,18,17,0.85)', padding: '8px 16px', borderRadius: 8, backdropFilter: 'blur(10px)' }}>
+              Nessun elemento rilevato
+            </span>
+            <button className="btn-select-manual" onClick={() => onSetMode('pristine')}>
+              Riprova
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
