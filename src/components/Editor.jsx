@@ -640,18 +640,6 @@ const IconText = () => (
   </svg>
 );
 
-const IconPhoto = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
-  </svg>
-);
-
-const IconCheck = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="20 6 9 17 4 12"/>
-  </svg>
-);
-
 const IconDownload = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
@@ -661,12 +649,6 @@ const IconDownload = () => (
 const IconUpload = () => (
   <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-  </svg>
-);
-
-const IconSelectAll = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
   </svg>
 );
 
@@ -1080,120 +1062,6 @@ export default function Editor({ onReset }) {
     setBatchProgress({ active: false, done: 0, total: 0 });
   }, [slides, runDetection]);
 
-  // ── Toggle individual block selection ────────────────────────────────────
-
-  const toggleTextBlock = useCallback((slideIndex, blockIndex) => {
-    setSlides(prev => {
-      const next = [...prev];
-      const slide = { ...next[slideIndex] };
-      const grabbed = new Set(slide.grabbedTextIndices);
-      if (grabbed.has(blockIndex)) grabbed.delete(blockIndex);
-      else grabbed.add(blockIndex);
-      slide.grabbedTextIndices = grabbed;
-      next[slideIndex] = slide;
-      return next;
-    });
-  }, []);
-
-  const toggleImageBlock = useCallback((slideIndex, blockIndex) => {
-    setSlides(prev => {
-      const next = [...prev];
-      const slide = { ...next[slideIndex] };
-      const grabbed = new Set(slide.grabbedImageIndices);
-      if (grabbed.has(blockIndex)) grabbed.delete(blockIndex);
-      else grabbed.add(blockIndex);
-      slide.grabbedImageIndices = grabbed;
-      next[slideIndex] = slide;
-      return next;
-    });
-  }, []);
-
-  // ── Select all for a slide ────────────────────────────────────────────────
-
-  const selectAll = useCallback((slideIndex) => {
-    setSlides(prev => {
-      const next = [...prev];
-      const slide = { ...next[slideIndex] };
-      const det = slide.detection;
-      slide.grabbedTextIndices = new Set(det.textBlocks.map((_, i) => i));
-      slide.grabbedImageIndices = new Set(det.imageRegions.map((_, i) => i));
-      next[slideIndex] = slide;
-      return next;
-    });
-  }, []);
-
-  // ── Set slide mode ────────────────────────────────────────────────────────
-
-  const setSlideMode = useCallback((slideIndex, mode) => {
-    setSlides(prev => {
-      const next = [...prev];
-      next[slideIndex] = { ...next[slideIndex], mode };
-      return next;
-    });
-  }, []);
-
-  // ── Acquire text: inpaint slide and enter editing mode ──────────────────
-  // mode: 'text' = acquire text only, 'all' = acquire text + images
-  const acquireText = useCallback(async (slideIndex, inpaintMode = 'text') => {
-    // Set processing mode
-    setSlides(prev => {
-      const next = [...prev];
-      next[slideIndex] = { ...next[slideIndex], mode: 'processing' };
-      return next;
-    });
-
-    try {
-      const slide = slides[slideIndex];
-      const resp = await fetch('/api/inpaint', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: slide.origDataUrl,
-          mode: inpaintMode,
-          email: user?.email,
-        }),
-      });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || 'Inpainting fallito');
-      }
-
-      const data = await resp.json();
-      if (!data.cleanedImage) throw new Error('Nessuna immagine ricevuta');
-
-      // Extract the data URL from the response (could be string or object)
-      let cleanedUrl = data.cleanedImage;
-      if (typeof cleanedUrl === 'object' && cleanedUrl.image_url?.url) {
-        cleanedUrl = cleanedUrl.image_url.url;
-      }
-
-      setSlides(prev => {
-        const next = [...prev];
-        next[slideIndex] = {
-          ...next[slideIndex],
-          cleanedDataUrl: cleanedUrl,
-          mode: 'editing',
-        };
-        return next;
-      });
-    } catch (err) {
-      console.error('Acquire text error:', err);
-      setSlides(prev => {
-        const next = [...prev];
-        next[slideIndex] = {
-          ...next[slideIndex],
-          mode: 'detected',
-          detection: {
-            ...next[slideIndex].detection,
-            error: err.message,
-          },
-        };
-        return next;
-      });
-    }
-  }, [slides, user]);
-
   // ── Update edited text for a block ──────────────────────────────────────
   const updateBlockText = useCallback((slideIndex, blockIndex, newText) => {
     setSlides(prev => {
@@ -1526,13 +1394,7 @@ export default function Editor({ onReset }) {
               slide={slide}
               index={si}
               onDetect={() => runDetection(si)}
-              onToggleText={(bi) => toggleTextBlock(si, bi)}
-              onToggleImage={(bi) => toggleImageBlock(si, bi)}
-              onSelectAll={() => selectAll(si)}
-              onSetMode={(mode) => setSlideMode(si, mode)}
               onExportSlide={() => exportSlide(si)}
-              onAcquireText={() => acquireText(si, 'text')}
-              onAcquireAll={() => acquireText(si, 'all')}
               onUpdateText={(bi, text) => updateBlockText(si, bi, text)}
             />
           ))}
@@ -1598,49 +1460,20 @@ function UploadZone({ isDragOver, onDragOver, onDragLeave, onDrop, onClick, maxP
 
 // ─── SlideCard sub-component ──────────────────────────────────────────────────
 
-function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSelectAll, onSetMode, onExportSlide, onAcquireText, onAcquireAll, onUpdateText }) {
+function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
   const { origDataUrl, detection, grabbedTextIndices, grabbedImageIndices, mode, exporting } = slide;
   const det = detection;
   const isLoading = det.status === 'loading';
-  const isDone = det.status === 'done';
   const isError = det.status === 'error';
 
-  const totalText = isDone ? det.textBlocks.length : 0;
-  const totalImages = isDone ? det.imageRegions.length : 0;
-  const totalBlocks = totalText + totalImages;
-  const totalGrabbed = grabbedTextIndices.size + grabbedImageIndices.size;
-
-  // mode === 'pristine': show toolbar with Cattura buttons
-  // mode === 'detected': show results overlay + primary actions
-  // mode === 'selecting': show manual selection mode
-  // mode === 'processing': AI is removing text (inpainting)
-  // mode === 'editing': show cleaned background with editable text blocks
-
+  // Solo due mode raggiungibili: 'pristine' (in attesa) e 'editing' (modificabile).
   const isPristine = mode === 'pristine';
-  const isDetected = mode === 'detected';
-  const isSelecting = mode === 'selecting';
-  const isProcessing = mode === 'processing';
   const isEditing = mode === 'editing';
 
   return (
     <div className="slide-wrap">
       <div className="slide-label">
         Slide {index + 1}
-        {isDetected && totalBlocks > 0 && (
-          <span style={{ marginLeft: 8, color: 'var(--accent)', fontWeight: 600 }}>
-            · pronto per l'export
-          </span>
-        )}
-        {isSelecting && (
-          <span style={{ marginLeft: 8, color: 'var(--text-dim)', fontWeight: 500 }}>
-            · {totalGrabbed} / {totalBlocks} selezionat{totalGrabbed !== 1 ? 'i' : 'o'}
-          </span>
-        )}
-        {isProcessing && (
-          <span style={{ marginLeft: 8, color: 'var(--text-dim)', fontWeight: 500 }}>
-            · elaborazione...
-          </span>
-        )}
         {isEditing && (
           <span style={{ marginLeft: 8, color: 'var(--accent)', fontWeight: 600 }}>
             · modalità modifica
@@ -1649,87 +1482,8 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
       </div>
 
       <div className="slide-canvas-wrap">
-        {/* Background image */}
+        {/* Background image: cleanedDataUrl in editing, originale altrimenti */}
         <img className="slide-bg-img" src={isEditing && slide.cleanedDataUrl ? slide.cleanedDataUrl : origDataUrl} alt={`Slide ${index + 1}`} draggable={false} />
-
-        {/* Detected mode: visible highlight overlay (non-interactive) */}
-        {isDetected && isDone && (
-          <div className="slide-overlay">
-            {det.textBlocks.map((tb, bi) => (
-              <div
-                key={`t${bi}`}
-                className="detected-block"
-                style={{
-                  left: `${(tb.x || 0) * 100}%`,
-                  top: `${(tb.y || 0) * 100}%`,
-                  width: `${(tb.w || 0) * 100}%`,
-                  height: `${(tb.h || 0) * 100}%`,
-                }}
-              />
-            ))}
-            {det.imageRegions.map((ir, bi) => (
-              <div
-                key={`i${bi}`}
-                className="detected-img-block"
-                style={{
-                  left: `${(ir.x || 0) * 100}%`,
-                  top: `${(ir.y || 0) * 100}%`,
-                  width: `${(ir.w || 0) * 100}%`,
-                  height: `${(ir.h || 0) * 100}%`,
-                }}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Selecting mode: clickable toggle blocks */}
-        {isSelecting && isDone && (
-          <div className="slide-overlay">
-            {det.textBlocks.map((tb, bi) => (
-              <div
-                key={`t${bi}`}
-                className={`select-block ${grabbedTextIndices.has(bi) ? 'included' : 'excluded'}`}
-                style={{
-                  left: `${(tb.x || 0) * 100}%`,
-                  top: `${(tb.y || 0) * 100}%`,
-                  width: `${(tb.w || 0) * 100}%`,
-                  height: `${(tb.h || 0) * 100}%`,
-                }}
-                onClick={() => onToggleText(bi)}
-                title={tb.text ? tb.text.substring(0, 80) : 'Blocco testo'}
-              />
-            ))}
-            {det.imageRegions.map((ir, bi) => (
-              <div
-                key={`i${bi}`}
-                className={`select-img-block ${grabbedImageIndices.has(bi) ? 'included' : 'excluded'}`}
-                style={{
-                  left: `${(ir.x || 0) * 100}%`,
-                  top: `${(ir.y || 0) * 100}%`,
-                  width: `${(ir.w || 0) * 100}%`,
-                  height: `${(ir.h || 0) * 100}%`,
-                }}
-                onClick={() => onToggleImage(bi)}
-                title="Regione immagine"
-              >
-                {grabbedImageIndices.has(bi) && (
-                  <span className="select-img-badge">IMG</span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Processing overlay — AI is removing text */}
-        {isProcessing && (
-          <div className="processing-overlay">
-            <div className="spinner-large" />
-            <span>Elaborazione in corso...</span>
-            <span style={{ fontSize: 12, color: 'var(--text-dim)', fontWeight: 400 }}>
-              L'AI sta rimuovendo il testo dall'immagine
-            </span>
-          </div>
-        )}
 
         {/* Editing mode: editable text blocks on cleaned background */}
         {isEditing && (
@@ -1779,33 +1533,6 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
           </div>
         )}
 
-        {/* Results banner — shown in detected and selecting modes */}
-        {(isDetected || isSelecting) && isDone && totalBlocks > 0 && (
-          <div className="results-banner">
-            {totalText > 0 && (
-              <span>
-                {totalText} blocch{totalText !== 1 ? 'i' : 'o'} di testo
-              </span>
-            )}
-            {totalText > 0 && totalImages > 0 && (
-              <div className="results-banner-sep" />
-            )}
-            {totalImages > 0 && (
-              <span className="results-banner-img">
-                {totalImages} immagin{totalImages !== 1 ? 'i' : 'e'}
-              </span>
-            )}
-            {isSelecting && (
-              <>
-                <div className="results-banner-sep" />
-                <span style={{ color: 'var(--text-dim)', fontWeight: 500, fontSize: 12 }}>
-                  {totalGrabbed} / {totalBlocks} sel.
-                </span>
-              </>
-            )}
-          </div>
-        )}
-
         {/* Pristine toolbar: un singolo click → AI + inpaint + editing */}
         {isPristine && (
           <div className="slide-toolbar">
@@ -1838,51 +1565,6 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
           </div>
         )}
 
-        {/* Detected mode actions: Acquisisci testo / Acquisisci immagini / Seleziona */}
-        {isDetected && isDone && totalBlocks > 0 && (
-          <div className="slide-actions">
-            <button
-              className="btn-download-slide"
-              onClick={onAcquireText}
-            >
-              <IconText /> Acquisisci testo
-            </button>
-            <button
-              className="btn-download-slide"
-              onClick={onAcquireAll}
-              style={{ background: '#63a5d4', boxShadow: '0 4px 16px rgba(99,165,212,0.35)' }}
-            >
-              <IconPhoto /> Acquisisci immagini
-            </button>
-            <button
-              className="btn-select-manual"
-              onClick={() => onSetMode('selecting')}
-            >
-              Seleziona
-            </button>
-          </div>
-        )}
-
-        {/* Selecting mode actions */}
-        {isSelecting && isDone && (
-          <div className="slide-actions">
-            <button
-              className="btn-select-back"
-              onClick={() => { onSelectAll(); onSetMode('detected'); }}
-            >
-              Annulla
-            </button>
-            <button
-              className="btn-download-slide"
-              onClick={onAcquireText}
-              disabled={totalGrabbed === 0}
-            >
-              <IconText />
-              {totalGrabbed === 0 ? 'Nessun elemento' : `Acquisisci testo (${totalGrabbed})`}
-            </button>
-          </div>
-        )}
-
         {/* Editing mode actions: Download PPTX */}
         {isEditing && (
           <div className="editing-toolbar">
@@ -1902,17 +1584,6 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
           </div>
         )}
 
-        {/* No-results state in detected mode */}
-        {(isDetected || isSelecting) && isDone && totalBlocks === 0 && (
-          <div className="slide-actions">
-            <span style={{ fontSize: 13, color: 'var(--text-dim)', background: 'rgba(20,18,17,0.85)', padding: '8px 16px', borderRadius: 8, backdropFilter: 'blur(10px)' }}>
-              Nessun elemento rilevato
-            </span>
-            <button className="btn-select-manual" onClick={() => onSetMode('pristine')}>
-              Riprova
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
