@@ -2,10 +2,12 @@
  * POST /api/auth/check-email
  *
  * Checks whether an email address is authorized to access SlideForge.
+ * I pagamenti sono gestiti esternamente tramite Officina.
  *
- * Primary path: queries the `slideforge_subscribers` table in Supabase.
- * Fallback path: if Supabase is not configured, checks against the
- *   ALLOWED_EMAILS environment variable (comma-separated list).
+ * Lookup order:
+ *   1. Hardcoded whitelist (src/lib/allowedEmails.js) — fonte primaria
+ *   2. Supabase `subscribers` table (se configurato)
+ *   3. ALLOWED_EMAILS env var (fallback)
  *
  * Request body:
  * { email: string }
@@ -19,6 +21,7 @@
 
 import { NextResponse } from 'next/server';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { checkAllowedEmail } from '@/lib/allowedEmails';
 
 // ---------------------------------------------------------------------------
 // CORS headers — applied to every response
@@ -238,15 +241,23 @@ export async function POST(request) {
     return respond({ error: 'Invalid email address' }, 400);
   }
 
-  // --- Primary path: Supabase ---
+  // --- Primary path: hardcoded whitelist (Officina subscribers) ---
+  // I pagamenti sono gestiti esternamente: solo le email approvate accedono.
+  const whitelistResult = checkAllowedEmail(normalizedEmail);
+  if (whitelistResult.authorized) {
+    return respond(whitelistResult);
+  }
+
+  // --- Secondary path: Supabase (estensibilità futura) ---
   if (isSupabaseConfigured()) {
     try {
       const result = await checkSupabase(normalizedEmail);
-      return respond(result);
+      if (result.authorized) {
+        return respond(result);
+      }
     } catch (error) {
       console.error('check-email: Supabase error:', error.message);
-      // Fall through to fallback rather than returning 500,
-      // so the app stays functional even when the DB is temporarily unavailable.
+      // Continua col fallback env per non rompere l'app se il DB è giù.
     }
   }
 
