@@ -235,7 +235,7 @@ function makeSlide(origDataUrl, textBlocks) {
 // ─── Editor ───────────────────────────────────────────────────────────────────
 
 export default function Editor({ onReset }) {
-  const { tier: rawTier, isLoggedIn } = useTier();
+  const { tier: rawTier, isLoggedIn, user } = useTier();
   const tier = resolveTier(rawTier || '');
   const tierConfig = TIERS[tier] || null;
   const maxPages = getMaxPages(tier);
