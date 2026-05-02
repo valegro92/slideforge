@@ -1013,14 +1013,33 @@ export default function Editor({ onReset }) {
       const textBlocks = Array.isArray(data.textBlocks) ? data.textBlocks : [];
       const imageRegions = Array.isArray(data.imageRegions) ? data.imageRegions : [];
 
+      // Inpaint canvas client-side per la preview: cosi' l'utente vede subito
+      // lo sfondo "pulito" del testo originale e puo' modificare i text-block
+      // editabili senza ulteriori click.
+      let cleanedDataUrl = null;
+      if (textBlocks.length > 0) {
+        try {
+          const allIndices = new Set(textBlocks.map((_, i) => i));
+          const result = await clientSideInpaint(
+            slide.origDataUrl,
+            textBlocks,
+            allIndices
+          );
+          cleanedDataUrl = result?.dataUrl || null;
+        } catch (err) {
+          console.warn('[runDetection] clientSideInpaint preview failed', err);
+        }
+      }
+
       setSlides(prev => {
         const next = [...prev];
         next[slideIndex] = {
           ...next[slideIndex],
-          mode: 'detected',
+          mode: 'editing',
           detection: { status: 'done', error: null, textBlocks, imageRegions },
           grabbedTextIndices: new Set(textBlocks.map((_, i) => i)),
           grabbedImageIndices: new Set(imageRegions.map((_, i) => i)),
+          cleanedDataUrl,
         };
         return next;
       });
@@ -1439,8 +1458,8 @@ export default function Editor({ onReset }) {
                 title="Analizza con AI tutte le slide non ancora processate"
               >
                 {batchProgress.active
-                  ? `Catturando ${batchProgress.done} / ${batchProgress.total}...`
-                  : 'Cattura tutte'}
+                  ? `Elaborazione ${batchProgress.done} / ${batchProgress.total}...`
+                  : 'Rendi tutte modificabili'}
               </button>
               <button
                 className="btn btn-primary btn-sm"
@@ -1787,29 +1806,18 @@ function SlideCard({ slide, index, onDetect, onToggleText, onToggleImage, onSele
           </div>
         )}
 
-        {/* Pristine toolbar: Cattura testo / Cattura immagini */}
+        {/* Pristine toolbar: un singolo click → AI + inpaint + editing */}
         {isPristine && (
           <div className="slide-toolbar">
             <button
               className={`tb-btn${isLoading ? ' loading' : ''}`}
               onClick={!isLoading ? onDetect : undefined}
               disabled={isLoading}
-              title="Analizza testo e immagini con AI"
+              title="Analizza testo, pulisci lo sfondo e rendi modificabile in un click"
+              style={{ minWidth: 200 }}
             >
               {isLoading ? <div className="spinner" /> : <IconText />}
-              {isLoading ? 'Analisi...' : 'Cattura testo'}
-            </button>
-
-            <div className="toolbar-divider" />
-
-            <button
-              className={`tb-btn${isLoading ? ' loading' : ''}`}
-              onClick={!isLoading ? onDetect : undefined}
-              disabled={isLoading}
-              title="Analizza immagini con AI"
-            >
-              {isLoading ? <div className="spinner" /> : <IconPhoto />}
-              {isLoading ? 'Analisi...' : 'Cattura immagini'}
+              {isLoading ? 'Elaborazione...' : 'Rendi modificabile'}
             </button>
 
             {isError && (
