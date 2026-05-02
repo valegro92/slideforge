@@ -20,6 +20,7 @@
 
 import { callOpenRouter, validateResponse } from '@/lib/openrouter';
 import { canUseModel, getMaxPages, resolveTier } from '@/lib/tiers';
+import { checkAllowedEmail } from '@/lib/allowedEmails';
 
 // Simple in-memory rate limiting (use Redis in production)
 const requestCounts = new Map();
@@ -103,10 +104,8 @@ function validateRequest(body) {
     errors.push('model must be a string if provided');
   }
 
-  if (!body.tier) {
-    errors.push('Missing required field: tier');
-  } else if (!['pro', 'enterprise', 'admin'].includes(body.tier)) {
-    errors.push('Invalid tier: must be pro, enterprise, or admin');
+  if (!body.email || typeof body.email !== 'string') {
+    errors.push('Missing required field: email');
   }
 
   return { valid: errors.length === 0, errors };
@@ -163,10 +162,12 @@ export async function POST(request) {
     }
 
     const { image } = body;
-    const tier = resolveTier(body.tier);
 
-    // Block any tier that is not a paid subscriber tier
-    if (!['pro', 'enterprise'].includes(tier)) {
+    // ── Authorization: ricontrolla l'email contro la whitelist server-side ──
+    // Il tier client-side non e' affidabile (localStorage falsificabile),
+    // quindi la fonte di verita' e' sempre la whitelist hardcoded.
+    const auth = checkAllowedEmail(body.email);
+    if (!auth.authorized) {
       return new Response(
         JSON.stringify({
           error: 'Accesso riservato agli iscritti de La Cassetta degli AI-trezzi'
@@ -177,6 +178,8 @@ export async function POST(request) {
         }
       );
     }
+
+    const tier = resolveTier(auth.tier);
 
     const model = body.model || getModelForTier(tier);
 

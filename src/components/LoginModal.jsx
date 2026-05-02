@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-export default function LoginModal({ isOpen, onClose, onLogin }) {
+export default function LoginModal({ isOpen, onClose, onLogin, required = false }) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -52,7 +52,7 @@ export default function LoginModal({ isOpen, onClose, onLogin }) {
     <>
       {/* Overlay */}
       <div
-        onClick={onClose}
+        onClick={required ? undefined : onClose}
         style={{
           position: 'fixed',
           inset: 0,
@@ -80,24 +80,26 @@ export default function LoginModal({ isOpen, onClose, onLogin }) {
           fontFamily: "'DM Sans', system-ui, sans-serif",
         }}
       >
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          style={{
-            position: 'absolute',
-            top: '12px',
-            right: '16px',
-            background: 'none',
-            border: 'none',
-            color: '#A9A8A7',
-            fontSize: '1.5rem',
-            cursor: 'pointer',
-            lineHeight: 1,
-          }}
-          aria-label="Chiudi"
-        >
-          ×
-        </button>
+        {/* Close button — nascosto in modalita' bloccante */}
+        {!required && (
+          <button
+            onClick={onClose}
+            style={{
+              position: 'absolute',
+              top: '12px',
+              right: '16px',
+              background: 'none',
+              border: 'none',
+              color: '#A9A8A7',
+              fontSize: '1.5rem',
+              cursor: 'pointer',
+              lineHeight: 1,
+            }}
+            aria-label="Chiudi"
+          >
+            ×
+          </button>
+        )}
 
         {/* Header */}
         <h2
@@ -170,25 +172,27 @@ export default function LoginModal({ isOpen, onClose, onLogin }) {
 
           {/* Buttons */}
           <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{
-                flex: 1,
-                padding: '12px 16px',
-                background: 'transparent',
-                border: '1px solid #454545',
-                borderRadius: '8px',
-                color: '#A9A8A7',
-                fontSize: '0.9rem',
-                fontWeight: 600,
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-              }}
-            >
-              Continua senza login
-            </button>
+            {!required && (
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  flex: 1,
+                  padding: '12px 16px',
+                  background: 'transparent',
+                  border: '1px solid #454545',
+                  borderRadius: '8px',
+                  color: '#A9A8A7',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+              >
+                Continua senza login
+              </button>
+            )}
             <button
               type="submit"
               disabled={loading || !email.trim()}

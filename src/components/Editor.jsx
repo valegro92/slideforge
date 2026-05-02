@@ -730,7 +730,7 @@ function createSlideState(origDataUrl, width, height) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Editor({ onReset }) {
-  const { tier: rawTier, isLoggedIn } = useTier();
+  const { tier: rawTier, isLoggedIn, user } = useTier();
   const tier = resolveTier(rawTier || '');
   const maxPages = getMaxPages(tier);
   const tierConfig = TIERS[tier] || null;
@@ -824,7 +824,10 @@ export default function Editor({ onReset }) {
       const resp = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: slide.origDataUrl, tier })
+        body: JSON.stringify({
+          image: slide.origDataUrl,
+          email: user?.email,
+        })
       });
 
       if (!resp.ok) {
@@ -857,7 +860,7 @@ export default function Editor({ onReset }) {
         return next;
       });
     }
-  }, [slides, tier]);
+  }, [slides, tier, user]);
 
   // ── Toggle individual block selection ────────────────────────────────────
 
@@ -926,7 +929,11 @@ export default function Editor({ onReset }) {
       const resp = await fetch('/api/inpaint', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: slide.origDataUrl, mode: inpaintMode }),
+        body: JSON.stringify({
+          image: slide.origDataUrl,
+          mode: inpaintMode,
+          email: user?.email,
+        }),
       });
 
       if (!resp.ok) {
@@ -967,7 +974,7 @@ export default function Editor({ onReset }) {
         return next;
       });
     }
-  }, [slides]);
+  }, [slides, user]);
 
   // ── Update edited text for a block ──────────────────────────────────────
   const updateBlockText = useCallback((slideIndex, blockIndex, newText) => {

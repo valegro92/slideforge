@@ -9,6 +9,7 @@
  */
 
 import { eraseTextWithAI } from '@/lib/openrouter';
+import { checkAllowedEmail } from '@/lib/allowedEmails';
 
 export async function POST(request) {
   try {
@@ -27,6 +28,17 @@ export async function POST(request) {
       return new Response(
         JSON.stringify({ error: 'Invalid JSON' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ── Authorization: ricontrolla l'email contro la whitelist server-side ──
+    const auth = checkAllowedEmail(body.email);
+    if (!auth.authorized) {
+      return new Response(
+        JSON.stringify({
+          error: 'Accesso riservato agli iscritti de La Cassetta degli AI-trezzi'
+        }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
