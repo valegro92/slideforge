@@ -157,72 +157,93 @@ function loadImage(src) {
 }
 
 async function smartTextRemoval(origDataUrl, textBlocks) {
-  if (!textBlocks || textBlocks.length === 0) {
-    return origDataUrl;
-  }
+  if (!textBlocks || textBlocks.length === 0) return origDataUrl;
+
   const img = await loadImage(origDataUrl);
   const W = img.naturalWidth;
   const H = img.naturalHeight;
+  if (!W || !H) return origDataUrl;
+
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
 
-  const PAD = 0.10;             // espansione 10% del bbox
-  const DIST_THRESHOLD = 70;    // soglia distanza colore per "testo"
+  const PAD = 0.20;            // 20% expansion around each bbox
+  const BORDER = 10;           // pixels of border strip used to sample background
+  const DIST_THRESHOLD = 100;  // colour distance threshold to classify as "text"
+
+  // Returns median RGB from a rectangular strip, or null if out of bounds.
+  function stripMedian(sx, sy, sw, sh) {
+    if (sw <= 0 || sh <= 0 || sx < 0 || sy < 0 || sx + sw > W || sy + sh > H) return null;
+    const d = ctx.getImageData(sx, sy, sw, sh).data;
+    const R = [], G = [], B = [];
+    for (let p = 0; p < d.length; p += 4) { R.push(d[p]); G.push(d[p + 1]); B.push(d[p + 2]); }
+    R.sort((a, b) => a - b); G.sort((a, b) => a - b); B.sort((a, b) => a - b);
+    const m = R.length >> 1;
+    return { r: R[m], g: G[m], b: B[m] };
+  }
 
   for (const tb of textBlocks) {
-    const x0 = (tb.x || 0) * W;
-    const y0 = (tb.y || 0) * H;
-    const w0 = (tb.w || 0) * W;
-    const h0 = (tb.h || 0) * H;
-    if (w0 < 4 || h0 < 4) continue;
-    const padX = w0 * PAD;
-    const padY = h0 * PAD;
-    const x = Math.max(0, Math.floor(x0 - padX));
-    const y = Math.max(0, Math.floor(y0 - padY));
-    const w = Math.min(W - x, Math.ceil(w0 + padX * 2));
-    const h = Math.min(H - y, Math.ceil(h0 + padY * 2));
-    if (w < 4 || h < 4) continue;
+    const x0 = Math.floor((tb.x || 0) * W);
+    const y0 = Math.floor((tb.y || 0) * H);
+    const w0 = Math.ceil(Math.max(4, (tb.w || 0) * W));
+    const h0 = Math.ceil(Math.max(4, (tb.h || 0) * H));
 
-    const region = ctx.getImageData(x, y, w, h);
+    const padX = Math.ceil(w0 * PAD);
+    const padY = Math.ceil(h0 * PAD);
+    const rx = Math.max(0, x0 - padX);
+    const ry = Math.max(0, y0 - padY);
+    const rw = Math.min(W - rx, w0 + padX * 2);
+    const rh = Math.min(H - ry, h0 + padY * 2);
+    if (rw < 2 || rh < 2) continue;
+
+    // Estimate background from a thin strip OUTSIDE the removal box.
+    // This avoids contamination by text pixels inside the box.
+    const strips = [
+      stripMedian(rx, Math.max(0, ry - BORDER), rw, Math.min(BORDER, ry)),
+      stripMedian(rx, ry + rh, rw, Math.min(BORDER, H - ry - rh)),
+      stripMedian(Math.max(0, rx - BORDER), ry, Math.min(BORDER, rx), rh),
+      stripMedian(rx + rw, ry, Math.min(BORDER, W - rx - rw), rh),
+    ].filter(Boolean);
+
+    let bgR, bgG, bgB;
+    if (strips.length > 0) {
+      bgR = (strips.reduce((s, c) => s + c.r, 0) / strips.length) | 0;
+      bgG = (strips.reduce((s, c) => s + c.g, 0) / strips.length) | 0;
+      bgB = (strips.reduce((s, c) => s + c.b, 0) / strips.length) | 0;
+    } else {
+      // Fallback: use the lighter 60% of the region itself.
+      const d0 = ctx.getImageData(rx, ry, rw, rh).data;
+      const lumas = [];
+      for (let p = 0; p < d0.length; p += 4)
+        lumas.push((d0[p] * 0.299 + d0[p + 1] * 0.587 + d0[p + 2] * 0.114) | 0);
+      lumas.sort((a, b) => a - b);
+      const lt = lumas[Math.floor(lumas.length * 0.4)] || 128;
+      const R2 = [], G2 = [], B2 = [];
+      for (let p = 0; p < d0.length; p += 4) {
+        if (d0[p] * 0.299 + d0[p + 1] * 0.587 + d0[p + 2] * 0.114 >= lt) {
+          R2.push(d0[p]); G2.push(d0[p + 1]); B2.push(d0[p + 2]);
+        }
+      }
+      if (R2.length === 0) continue;
+      R2.sort((a, b) => a - b); G2.sort((a, b) => a - b); B2.sort((a, b) => a - b);
+      const m2 = R2.length >> 1;
+      bgR = R2[m2]; bgG = G2[m2]; bgB = B2[m2];
+    }
+
+    const region = ctx.getImageData(rx, ry, rw, rh);
     const px = region.data;
-
-    // Background dominante: mediana RGB sui pixel piu' chiari (40% top luma)
-    const lumas = [];
     for (let p = 0; p < px.length; p += 4) {
-      lumas.push((px[p] * 0.299 + px[p + 1] * 0.587 + px[p + 2] * 0.114) | 0);
-    }
-    lumas.sort((a, b) => a - b);
-    const lightThreshold = lumas[Math.floor(lumas.length * 0.4)] || 128;
-
-    const bgR = [], bgG = [], bgB = [];
-    for (let p = 0; p < px.length; p += 4) {
-      const lum = px[p] * 0.299 + px[p + 1] * 0.587 + px[p + 2] * 0.114;
-      if (lum >= lightThreshold) {
-        bgR.push(px[p]); bgG.push(px[p + 1]); bgB.push(px[p + 2]);
-      }
-    }
-    if (bgR.length === 0) continue;
-    bgR.sort((a, b) => a - b);
-    bgG.sort((a, b) => a - b);
-    bgB.sort((a, b) => a - b);
-    const mid = bgR.length >> 1;
-    const bg = { r: bgR[mid], g: bgG[mid], b: bgB[mid] };
-
-    // Sostituisci pixel "scuri" (= testo) col background
-    for (let p = 0; p < px.length; p += 4) {
-      const dr = Math.abs(px[p] - bg.r);
-      const dg = Math.abs(px[p + 1] - bg.g);
-      const db = Math.abs(px[p + 2] - bg.b);
+      const dr = Math.abs(px[p] - bgR);
+      const dg = Math.abs(px[p + 1] - bgG);
+      const db = Math.abs(px[p + 2] - bgB);
       if (dr + dg + db > DIST_THRESHOLD) {
-        px[p] = bg.r;
-        px[p + 1] = bg.g;
-        px[p + 2] = bg.b;
+        px[p] = bgR; px[p + 1] = bgG; px[p + 2] = bgB;
       }
     }
-    ctx.putImageData(region, x, y);
+    ctx.putImageData(region, rx, ry);
   }
 
   return canvas.toDataURL('image/jpeg', 0.92);
@@ -247,7 +268,8 @@ async function extractTextFromPage(page) {
     // (a,b,c,d) = scale/rotation, (e,f) = position in PDF coords (origin: bottom-left).
     const [, , c, d, e, f] = item.transform;
     const fontHeight = Math.hypot(c, d) || item.height || 12;
-    const widthPx = item.width || 0;
+    // item.width is 0 in some PDFs; fall back to a character-count estimate.
+    const widthPx = item.width > 0 ? item.width : str.length * fontHeight * 0.55;
     // Top-left in viewport coords (origin: top-left).
     const top = H - f;
     const left = e;
@@ -256,7 +278,7 @@ async function extractTextFromPage(page) {
       text: str,
       x: left / W,
       y: Math.max(0, (top - fontHeight) / H),
-      w: Math.max(0.01, widthPx / W),
+      w: Math.max(0.02, widthPx / W),
       h: Math.max(0.01, fontHeight / H),
       fontSize: Math.round(fontHeight),
       bold: /bold|black|heavy/i.test(item.fontName || ''),
@@ -274,7 +296,7 @@ async function extractTextFromPage(page) {
     if (last
       && Math.abs(last.y - b.y) < (last.h * 0.5)
       && Math.abs(last.fontSize - b.fontSize) < 2
-      && (b.x - (last.x + last.w)) < (last.h * 1.5)) {
+      && (b.x - (last.x + last.w)) < (last.h * 3)) {
       // estendi il blocco precedente
       last.text = last.text + (b.x - (last.x + last.w) > last.h * 0.2 ? ' ' : '') + b.text;
       last.w = (b.x + b.w) - last.x;
