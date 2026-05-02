@@ -59,13 +59,12 @@ const STYLES = `
     box-shadow: 0 8px 32px rgba(0,0,0,0.45); background: #FFFFFF; }
   .editable-text-block { position: absolute; box-sizing: border-box;
     background: transparent; outline: none;
-    cursor: text; padding: 0; line-height: 1.15;
-    white-space: pre-wrap; word-break: break-word; overflow: visible;
-    pointer-events: all; min-width: 8px; min-height: 14px;
-    color: #222 !important; }
+    cursor: text; padding: 0; line-height: 1.25;
+    white-space: pre-wrap; word-break: break-word; overflow: hidden;
+    pointer-events: all; min-width: 8px; min-height: 14px; }
   .editable-text-block:hover { outline: 1.5px dashed rgba(45,212,168,0.5); }
   .editable-text-block:focus { outline: 2px solid var(--accent);
-    background: rgba(255,255,255,0.6); }
+    background: rgba(128,128,128,0.25); }
   .ed-error { background: rgba(248,113,113,0.1); border: 1px solid var(--error);
     color: var(--error); padding: 12px 16px; border-radius: 8px;
     font-size: 13px; max-width: 600px; margin: 0 auto; }
@@ -191,12 +190,19 @@ async function smartTextRemoval(origDataUrl, textBlocks) {
     const w0 = Math.ceil(Math.max(4, (tb.w || 0) * W));
     const h0 = Math.ceil(Math.max(4, (tb.h || 0) * H));
 
+    // Estimate how many visual lines the text wraps to.
+    // h0 = one em; avg char width ≈ 0.55 em. Wrapped lines need h0 * numLines erased.
+    const avgCharW = Math.max(1, h0 * 0.55);
+    const charsPerLine = Math.max(1, Math.floor(w0 / avgCharW));
+    const numLines = Math.max(1, Math.ceil((tb.text || '').trim().length / charsPerLine));
+    const h0eff = Math.ceil(h0 * numLines * 1.25); // 1.25 = line-height factor
+
     const padX = Math.ceil(w0 * PAD);
     const padY = Math.ceil(h0 * PAD);
     const rx = Math.max(0, x0 - padX);
     const ry = Math.max(0, y0 - padY);
     const rw = Math.min(W - rx, w0 + padX * 2);
-    const rh = Math.min(H - ry, h0 + padY * 2);
+    const rh = Math.min(H - ry, h0eff + padY * 2); // use h0eff, not h0
     if (rw < 2 || rh < 2) continue;
 
     // Estimate background from a thin strip OUTSIDE the removal box.
@@ -646,9 +652,39 @@ function UploadZone({ isDragOver, onDragOver, onDragLeave, onDrop, onClick, maxP
   );
 }
 
+// Detect dominant luma from 4 corners of an image data URL (async, best-effort).
+function detectSlideBgLuma(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const S = 24;
+        const canvas = document.createElement('canvas');
+        canvas.width = S * 2; canvas.height = S * 2;
+        const ctx = canvas.getContext('2d');
+        const iw = img.naturalWidth; const ih = img.naturalHeight;
+        // draw 4 corners compressed into a 2×2 grid of S×S patches
+        ctx.drawImage(img, 0,      0,      S, S, 0, 0, S, S);
+        ctx.drawImage(img, iw - S, 0,      S, S, S, 0, S, S);
+        ctx.drawImage(img, 0,      ih - S, S, S, 0, S, S, S);
+        ctx.drawImage(img, iw - S, ih - S, S, S, S, S, S, S);
+        const d = ctx.getImageData(0, 0, S * 2, S * 2).data;
+        let luma = 0;
+        for (let p = 0; p < d.length; p += 4)
+          luma += d[p] * 0.299 + d[p + 1] * 0.587 + d[p + 2] * 0.114;
+        resolve(luma / (d.length / 4));
+      } catch { resolve(200); } // fallback: assume light
+    };
+    img.onerror = () => resolve(200);
+    img.src = dataUrl;
+  });
+}
+
 function SlideCard({ slide, index, onUpdateText }) {
   const wrapRef = useRef(null);
   const [W, setW] = useState(960);
+  const [darkBg, setDarkBg] = useState(false);
+
   useEffect(() => {
     if (!wrapRef.current) return;
     const ro = new ResizeObserver(entries => {
@@ -657,9 +693,27 @@ function SlideCard({ slide, index, onUpdateText }) {
     ro.observe(wrapRef.current);
     return () => ro.disconnect();
   }, []);
+
+  // Detect if slide has a dark background to choose contrasting text colour.
+  useEffect(() => {
+    const src = slide.cleanedDataUrl || slide.origDataUrl;
+    if (!src) return;
+    detectSlideBgLuma(src).then(luma => setDarkBg(luma < 128));
+  }, [slide.cleanedDataUrl, slide.origDataUrl]);
+
   const H = W * 9 / 16;
   // 1pt = 1/72in; SLIDE_H = 7.5in = 540pt. Quindi 1pt = H/540 px.
   const ptToPx = H / 540;
+  const textColor = darkBg ? '#f0f0f0' : '#111111';
+
+  // Estimate visual line count for a text block (mirrors smartTextRemoval logic).
+  function estimateLines(tb) {
+    const blockWpx = Math.max(1, (tb.w || 0.1) * W);
+    const fontPx = Math.max(8, (tb.fontSize || 14) * ptToPx);
+    const avgCharW = fontPx * 0.55;
+    const charsPerLine = Math.max(1, Math.floor(blockWpx / avgCharW));
+    return Math.max(1, Math.ceil((tb.text || '').trim().length / charsPerLine));
+  }
 
   return (
     <div className="slide-wrap">
@@ -681,26 +735,34 @@ function SlideCard({ slide, index, onUpdateText }) {
             pointerEvents: 'none', userSelect: 'none',
           }}
         />
-        {slide.textBlocks.map((tb, bi) => (
-          <div key={bi} contentEditable suppressContentEditableWarning
-            className="editable-text-block"
-            style={{
-              left: `${(tb.x || 0) * 100}%`,
-              top: `${(tb.y || 0) * 100}%`,
-              width: `${Math.max(2, (tb.w || 0) * 100)}%`,
-              minHeight: `${Math.max(1.5, (tb.h || 0) * 100)}%`,
-              fontSize: `${Math.max(11, (tb.fontSize || 14) * ptToPx).toFixed(1)}px`,
-              fontWeight: tb.bold ? 700 : 400,
-              fontStyle: tb.italic ? 'italic' : 'normal',
-              textAlign: tb.align || 'left',
-              fontFamily: 'Arial, sans-serif',
-            }}
-            onBlur={(e) => onUpdateText(bi, e.currentTarget.innerText)}
-            dangerouslySetInnerHTML={{
-              __html: ((slide.edited[bi] !== undefined ? slide.edited[bi] : (tb.text || ''))
-                || '(vuoto)').replace(/\n/g, '<br>'),
-            }} />
-        ))}
+        {slide.textBlocks.map((tb, bi) => {
+          const lines = estimateLines(tb);
+          const fontPx = Math.max(11, (tb.fontSize || 14) * ptToPx);
+          // Height covers all estimated wrapped lines with 1.25 line-height,
+          // matching the erasure area calculated in smartTextRemoval.
+          const blockHeightPct = Math.max(1.5, (tb.h || 0) * 100 * lines * 1.25);
+          return (
+            <div key={bi} contentEditable suppressContentEditableWarning
+              className="editable-text-block"
+              style={{
+                left: `${(tb.x || 0) * 100}%`,
+                top: `${(tb.y || 0) * 100}%`,
+                width: `${Math.max(2, (tb.w || 0) * 100)}%`,
+                height: `${blockHeightPct}%`,
+                fontSize: `${fontPx.toFixed(1)}px`,
+                fontWeight: tb.bold ? 700 : 400,
+                fontStyle: tb.italic ? 'italic' : 'normal',
+                textAlign: tb.align || 'left',
+                fontFamily: 'Arial, sans-serif',
+                color: textColor,
+              }}
+              onBlur={(e) => onUpdateText(bi, e.currentTarget.innerText)}
+              dangerouslySetInnerHTML={{
+                __html: ((slide.edited[bi] !== undefined ? slide.edited[bi] : (tb.text || ''))
+                  || '(vuoto)').replace(/\n/g, '<br>'),
+              }} />
+          );
+        })}
       </div>
     </div>
   );
