@@ -1132,24 +1132,59 @@ export default function Editor({ onReset }) {
         x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
       });
 
-      // 3) Image regions: crop from ORIGINAL image and add as separate PPTX elements
-      for (const idx of slide.grabbedImageIndices) {
-        const region = det.imageRegions[idx];
-        if (!region) continue;
+      // 3) Image regions: ritaglia dall'originale solo le imageRegions che NON
+      //    si sovrappongono ai textBlocks editabili. Le imageRegions rilevate
+      //    dall'AI spesso includono "bottoni" decorati (es. header colorati con
+      //    testo dentro): se le ritagliamo cosi' come sono, nel PPTX appaiono
+      //    insieme al text-block editabile sovrastante → effetto doppio testo.
+      const grabbedTexts = (det.textBlocks || []).filter((_, i) => slide.grabbedTextIndices?.has(i));
 
-        // We need a canvas from the ORIGINAL image (not the cleaned one)
-        const origImg = await new Promise((resolve) => {
+      const overlapsAnyText = (region) => {
+        const rx0 = region.x || 0;
+        const ry0 = region.y || 0;
+        const rx1 = rx0 + (region.w || 0);
+        const ry1 = ry0 + (region.h || 0);
+        const rArea = Math.max(0, rx1 - rx0) * Math.max(0, ry1 - ry0);
+        if (rArea <= 0) return false;
+        for (const tb of grabbedTexts) {
+          const tx0 = tb.x || 0;
+          const ty0 = tb.y || 0;
+          const tx1 = tx0 + (tb.w || 0);
+          const ty1 = ty0 + (tb.h || 0);
+          const ix = Math.max(0, Math.min(rx1, tx1) - Math.max(rx0, tx0));
+          const iy = Math.max(0, Math.min(ry1, ty1) - Math.max(ry0, ty0));
+          const inter = ix * iy;
+          // Skip se >25% del riquadro immagine e' coperto da un text-block:
+          // l'immagine probabilmente e' un bottone/banner che contiene quel testo.
+          if (inter / rArea > 0.25) return true;
+        }
+        return false;
+      };
+
+      // Carica l'origImg una sola volta (non per ogni region)
+      let origImgCanvas = null;
+      const loadOrig = async () => {
+        if (origImgCanvas) return origImgCanvas;
+        return new Promise((resolve) => {
           const img = new Image();
           img.onload = () => {
             const c = document.createElement('canvas');
             c.width = img.naturalWidth;
             c.height = img.naturalHeight;
             c.getContext('2d').drawImage(img, 0, 0);
+            origImgCanvas = c;
             resolve(c);
           };
           img.src = slide.origDataUrl;
         });
+      };
 
+      for (const idx of slide.grabbedImageIndices) {
+        const region = det.imageRegions[idx];
+        if (!region) continue;
+        if (overlapsAnyText(region)) continue; // skip: era un bottone con testo
+
+        const origImg = await loadOrig();
         const cw = origImg.width, ch = origImg.height;
         const rx = Math.max(0, Math.round((region.x || 0) * cw));
         const ry = Math.max(0, Math.round((region.y || 0) * ch));
