@@ -91,6 +91,17 @@ const STYLES = `
     color: var(--accent);
   }
 
+  .btn-secondary {
+    background: rgba(45, 212, 168, 0.12);
+    border: 1px solid rgba(45, 212, 168, 0.4);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: rgba(45, 212, 168, 0.2);
+    border-color: var(--accent);
+  }
+
   .btn-sm {
     padding: 6px 12px;
     font-size: 12px;
@@ -730,7 +741,7 @@ function createSlideState(origDataUrl, width, height) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Editor({ onReset }) {
-  const { tier: rawTier, isLoggedIn } = useTier();
+  const { tier: rawTier, isLoggedIn, user } = useTier();
   const tier = resolveTier(rawTier || '');
   const maxPages = getMaxPages(tier);
   const tierConfig = TIERS[tier] || null;
@@ -741,6 +752,7 @@ export default function Editor({ onReset }) {
   const [fileName, setFileName] = useState('');
   const [exportError, setExportError] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ active: false, done: 0, total: 0 });
 
   const fileInputRef = useRef(null);
 
@@ -824,7 +836,10 @@ export default function Editor({ onReset }) {
       const resp = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: slide.origDataUrl, tier })
+        body: JSON.stringify({
+          image: slide.origDataUrl,
+          email: user?.email,
+        })
       });
 
       if (!resp.ok) {
@@ -857,7 +872,32 @@ export default function Editor({ onReset }) {
         return next;
       });
     }
-  }, [slides, tier]);
+  }, [slides, tier, user]);
+
+  // ── Batch AI detection: cattura tutte le slide in sequenza ───────────────
+
+  const runDetectionAll = useCallback(async () => {
+    const indices = slides
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) => s.detection.status !== 'done' && s.detection.status !== 'loading')
+      .map(({ i }) => i);
+
+    if (indices.length === 0) return;
+
+    setBatchProgress({ active: true, done: 0, total: indices.length });
+
+    for (let k = 0; k < indices.length; k++) {
+      try {
+        await runDetection(indices[k]);
+      } catch (err) {
+        console.error('Batch detection failed for slide', indices[k], err);
+        // Continua con le altre anche se una fallisce
+      }
+      setBatchProgress(p => ({ ...p, done: k + 1 }));
+    }
+
+    setBatchProgress({ active: false, done: 0, total: 0 });
+  }, [slides, runDetection]);
 
   // ── Toggle individual block selection ────────────────────────────────────
 
@@ -926,7 +966,11 @@ export default function Editor({ onReset }) {
       const resp = await fetch('/api/inpaint', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: slide.origDataUrl, mode: inpaintMode }),
+        body: JSON.stringify({
+          image: slide.origDataUrl,
+          mode: inpaintMode,
+          email: user?.email,
+        }),
       });
 
       if (!resp.ok) {
@@ -967,7 +1011,7 @@ export default function Editor({ onReset }) {
         return next;
       });
     }
-  }, [slides]);
+  }, [slides, user]);
 
   // ── Update edited text for a block ──────────────────────────────────────
   const updateBlockText = useCallback((slideIndex, blockIndex, newText) => {
@@ -1200,9 +1244,22 @@ export default function Editor({ onReset }) {
                 Nuovo PDF
               </button>
               <button
+                className="btn btn-secondary btn-sm"
+                onClick={runDetectionAll}
+                disabled={
+                  batchProgress.active ||
+                  slides.every(s => s.detection.status === 'done')
+                }
+                title="Analizza con AI tutte le slide non ancora processate"
+              >
+                {batchProgress.active
+                  ? `Catturando ${batchProgress.done} / ${batchProgress.total}...`
+                  : 'Cattura tutte'}
+              </button>
+              <button
                 className="btn btn-primary btn-sm"
                 onClick={exportPptx}
-                disabled={!canExport}
+                disabled={!canExport || batchProgress.active}
               >
                 <IconDownload /> Esporta PPTX
               </button>
