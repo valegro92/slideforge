@@ -1008,6 +1008,27 @@ export default function Editor({ onReset }) {
       const textBlocks = Array.isArray(data.textBlocks) ? data.textBlocks : [];
       const imageRegions = Array.isArray(data.imageRegions) ? data.imageRegions : [];
 
+      // Difesa: se l'AI non ha rilevato alcun testo, NON entriamo in editing
+      // mode (mostrerebbe solo bianco). Restiamo in pristine con un errore
+      // esplicito cosi' l'utente puo' riprovare.
+      if (textBlocks.length === 0) {
+        setSlides(prev => {
+          const next = [...prev];
+          next[slideIndex] = {
+            ...next[slideIndex],
+            mode: 'pristine',
+            detection: {
+              status: 'error',
+              error: 'Nessun testo rilevato. Riprova oppure passa alla slide successiva.',
+              textBlocks: [],
+              imageRegions: [],
+            },
+          };
+          return next;
+        });
+        return;
+      }
+
       // Preview con sfondo bianco: l'utente vede direttamente cio' che
       // sara' esportato (zero ridondanza tra immagine originale e text-block).
       let cleanedDataUrl = null;
