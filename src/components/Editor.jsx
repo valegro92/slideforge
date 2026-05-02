@@ -326,7 +326,7 @@ export default function Editor({ onReset }) {
           pSlide.addText(text, {
             x: tx, y: ty, w: tw, h: th,
             fontSize: Math.max(8, Math.min(48, tb.fontSize || 16)),
-            color: (tb.color || '#222222').replace('#', '').toUpperCase(),
+            color: '222222',
             bold: tb.bold === true,
             align: tb.align || 'left',
             fontFace: tb.fontFamily || 'Arial',
@@ -531,7 +531,7 @@ function SlideCard({ slide, index, onExtract, onUpdateText }) {
                   top: `${(tb.y || 0) * 100}%`,
                   width: `${(tb.w || 0) * 100}%`,
                   minHeight: `${(tb.h || 0) * 100}%`,
-                  color: tb.color || '#222222',
+                  color: '#222222',
                   fontSize: `${((tb.fontSize || 16) * 0.104).toFixed(2)}cqi`,
                   fontWeight: tb.bold ? 700 : 400,
                   textAlign: tb.align || 'left',
