@@ -63,11 +63,13 @@ const STYLES = `
     object-fit: fill; pointer-events: none; user-select: none; }
   .slide-overlay { position: absolute; inset: 0; pointer-events: auto; }
   .editable-text-block { position: absolute; box-sizing: border-box;
-    background: transparent; border: none; outline: none;
-    cursor: text; padding: 2px 4px; line-height: 1.25;
-    white-space: pre-wrap; word-break: break-word; overflow: hidden;
-    pointer-events: all; min-width: 12px; min-height: 12px; }
-  .editable-text-block:hover { outline: 1.5px dashed rgba(45,212,168,0.45);
+    background: transparent;
+    outline: 1px dashed rgba(0,0,0,0.18);
+    cursor: text; padding: 2px 4px; line-height: 1.2;
+    white-space: pre-wrap; word-break: break-word; overflow: visible;
+    pointer-events: all; min-width: 20px; min-height: 18px;
+    color: #222 !important; }
+  .editable-text-block:hover { outline: 1.5px dashed rgba(45,212,168,0.65);
     background: rgba(45,212,168,0.04); }
   .editable-text-block:focus { outline: 2px solid var(--accent);
     background: rgba(255,255,255,0.04);
@@ -499,6 +501,22 @@ function SlideCard({ slide, index, onExtract, onUpdateText }) {
   const isReady = slide.status === 'ready';
   const isError = slide.status === 'error';
 
+  const wrapRef = useRef(null);
+  const [containerW, setContainerW] = useState(960);
+  useEffect(() => {
+    if (!wrapRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) setContainerW(e.contentRect.width);
+    });
+    ro.observe(wrapRef.current);
+    return () => ro.disconnect();
+  }, []);
+  // Slide ha aspect 16:9 — altezza in px = larghezza * 9/16
+  const containerH = containerW * 9 / 16;
+  // 1 pt = 1/72 inch; slide PPTX e' 7.5in = 540pt di altezza.
+  // Quindi 1pt di font = containerH/540 pixel nella preview.
+  const ptToPx = containerH / 540;
+
   return (
     <div className="slide-wrap">
       <div className="slide-label">
@@ -515,7 +533,7 @@ function SlideCard({ slide, index, onExtract, onUpdateText }) {
         )}
       </div>
 
-      <div className="slide-canvas-wrap" style={{ background: isReady ? '#FFFFFF' : '#000' }}>
+      <div ref={wrapRef} className="slide-canvas-wrap" style={{ background: isReady ? '#FFFFFF' : '#000' }}>
         {!isReady && (
           <img className="slide-bg-img" src={slide.origDataUrl}
             alt={`Slide ${index + 1}`} draggable={false} />
@@ -529,18 +547,17 @@ function SlideCard({ slide, index, onExtract, onUpdateText }) {
                 style={{
                   left: `${(tb.x || 0) * 100}%`,
                   top: `${(tb.y || 0) * 100}%`,
-                  width: `${(tb.w || 0) * 100}%`,
-                  minHeight: `${(tb.h || 0) * 100}%`,
-                  color: '#222222',
-                  fontSize: `${((tb.fontSize || 16) * 0.104).toFixed(2)}cqi`,
+                  width: `${Math.max(2, (tb.w || 0) * 100)}%`,
+                  minHeight: `${Math.max(1.5, (tb.h || 0) * 100)}%`,
+                  fontSize: `${Math.max(11, (tb.fontSize || 16) * ptToPx).toFixed(1)}px`,
                   fontWeight: tb.bold ? 700 : 400,
                   textAlign: tb.align || 'left',
                   fontFamily: tb.fontFamily || 'Arial, sans-serif',
                 }}
                 onBlur={(e) => onUpdateText(bi, e.currentTarget.innerText)}
                 dangerouslySetInnerHTML={{
-                  __html: (slide.edited[bi] !== undefined ? slide.edited[bi] : (tb.text || ''))
-                    .replace(/\n/g, '<br>'),
+                  __html: ((slide.edited[bi] !== undefined ? slide.edited[bi] : (tb.text || ''))
+                    || '(vuoto)').replace(/\n/g, '<br>'),
                 }} />
             ))}
           </div>
