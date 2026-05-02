@@ -802,7 +802,20 @@ function rgbToHex({ r, g, b }) {
  * @returns {Promise<{ dataUrl: string, blockColors: Array<string|null> }>}
  *   blockColors[i] is the sampled hex (no '#') for block i, or null if not erased.
  */
-async function clientSideInpaint(origDataUrl, textBlocks, keepIndices) {
+async function clientSideInpaint(origDataUrl, textBlocks, keepIndices, opts = {}) {
+  // Modalita' "solo testo": sfondo completamente bianco, niente immagine originale.
+  // Garantisce zero residui per slide complesse (pattern, sfondi colorati).
+  if (opts.whiteOnly) {
+    const imgWhite = await loadImage(origDataUrl);
+    const cWhite = document.createElement('canvas');
+    cWhite.width = imgWhite.naturalWidth;
+    cWhite.height = imgWhite.naturalHeight;
+    const cx = cWhite.getContext('2d');
+    cx.fillStyle = '#FFFFFF';
+    cx.fillRect(0, 0, cWhite.width, cWhite.height);
+    return { dataUrl: cWhite.toDataURL('image/jpeg', 0.92), blockColors: [] };
+  }
+
   if (!textBlocks || textBlocks.length === 0) {
     return { dataUrl: origDataUrl, blockColors: [] };
   }
@@ -818,25 +831,25 @@ async function clientSideInpaint(origDataUrl, textBlocks, keepIndices) {
 
   const blockColors = new Array(textBlocks.length).fill(null);
 
-  // We sample BEFORE drawing any covers (to avoid sampling our own paint).
-  // Frame thickness in pixels — proportional to text height, but bounded.
+  // Frame piu' generoso per campionare lontano dal testo (descender/ascender,
+  // pattern grafici incollati, ecc.).
   const samples = textBlocks.map((tb, i) => {
     if (!keepIndices.has(i)) return null;
     const x = (tb.x || 0) * W;
     const y = (tb.y || 0) * H;
     const w = Math.max(2, (tb.w || 0.02) * W);
     const h = Math.max(2, (tb.h || 0.02) * H);
-    const frame = Math.max(6, Math.min(40, Math.round(h * 0.6)));
+    const frame = Math.max(10, Math.min(80, Math.round(h * 1.2)));
     const color = sampleBorderColor(ctx, x, y, w, h, frame, W, H);
     return { x, y, w, h, color };
   });
 
-  // Padding to overpaint AI-bbox inaccuracies. Generous on both axes,
-  // especially vertical (descenders/ascenders/line-spacing typically slip out).
-  // Expressed as a fraction of the box dimension, with absolute pixel mins.
-  const PAD_X_FRAC = 0.10;
-  const PAD_Y_FRAC = 0.30;
-  const MIN_PAD_PX = 6;
+  // Padding aggressivo per coprire i bbox imprecisi della AI Vision: il testo
+  // spesso sfugge sopra/sotto/lateralmente. Su slide dense (NotebookLM con
+  // tabelle/elenchi) servono valori molto generosi per evitare residui.
+  const PAD_X_FRAC = 0.25;
+  const PAD_Y_FRAC = 0.80;
+  const MIN_PAD_PX = 12;
 
   for (let i = 0; i < samples.length; i++) {
     const s = samples[i];
@@ -897,6 +910,10 @@ export default function Editor({ onReset }) {
   const [exportError, setExportError] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ active: false, done: 0, total: 0 });
+  // Modalita' "sfondo bianco": per slide complesse (pattern, sfondi colorati,
+  // testi piccoli ravvicinati) un fondo bianco con solo i text-block editabili
+  // e' piu' leggibile dell'inpaint canvas.
+  const [whiteBackground, setWhiteBackground] = useState(false);
 
   const fileInputRef = useRef(null);
 
@@ -999,13 +1016,14 @@ export default function Editor({ onReset }) {
       // lo sfondo "pulito" del testo originale e puo' modificare i text-block
       // editabili senza ulteriori click.
       let cleanedDataUrl = null;
-      if (textBlocks.length > 0) {
+      if (textBlocks.length > 0 || whiteBackground) {
         try {
           const allIndices = new Set(textBlocks.map((_, i) => i));
           const result = await clientSideInpaint(
             slide.origDataUrl,
             textBlocks,
-            allIndices
+            allIndices,
+            { whiteOnly: whiteBackground }
           );
           cleanedDataUrl = result?.dataUrl || null;
         } catch (err) {
@@ -1035,7 +1053,7 @@ export default function Editor({ onReset }) {
         return next;
       });
     }
-  }, [slides, tier, user]);
+  }, [slides, tier, user, whiteBackground]);
 
   // ── Batch AI detection: cattura tutte le slide in sequenza ───────────────
 
@@ -1098,7 +1116,21 @@ export default function Editor({ onReset }) {
       //         Risolve il bug dei "doppi testi" anche su sfondi colorati.
       //      c) origDataUrl puro (fallback estremo: niente testo grabbato)
       let bgDataUrl = slide.origDataUrl;
-      if (hasAiCleanBg) {
+      if (whiteBackground) {
+        // Override: sfondo completamente bianco. Garantisce zero residui
+        // su slide complesse (NotebookLM con pattern, sfondi colorati).
+        try {
+          const result = await clientSideInpaint(
+            slide.origDataUrl,
+            det.textBlocks || [],
+            new Set(),
+            { whiteOnly: true }
+          );
+          bgDataUrl = result.dataUrl;
+        } catch (err) {
+          console.warn('[export] white-background generation failed', err);
+        }
+      } else if (hasAiCleanBg) {
         bgDataUrl = slide.cleanedDataUrl;
       } else if (hasGrabbedText) {
         try {
@@ -1109,10 +1141,7 @@ export default function Editor({ onReset }) {
           );
           bgDataUrl = result.dataUrl;
         } catch (err) {
-          // Fallback: se l'inpaint canvas fallisce, usiamo l'originale e
-          // copriamo i text-block con un rettangolo bianco generosamente
-          // padded — meglio di niente.
-          console.warn('[export] clientSideInpaint failed, using white-rect fallback', err);
+          console.warn('[export] clientSideInpaint failed, using original', err);
           bgDataUrl = slide.origDataUrl;
         }
       }
@@ -1200,7 +1229,7 @@ export default function Editor({ onReset }) {
 
     const safeName = name.replace(/[^a-z0-9_-]/gi, '_') || 'slideforge';
     await pptx.writeFile({ fileName: `${safeName}.pptx` });
-  }, []);
+  }, [whiteBackground]);
 
   // ── Export single slide ───────────────────────────────────────────────────
 
@@ -1313,6 +1342,22 @@ export default function Editor({ onReset }) {
           <span className="tier-badge">{tierConfig.name}</span>
           {phase === 'slides' && (
             <>
+              <label
+                title="Sostituisce lo sfondo originale con bianco. Utile su slide complesse (pattern, sfondi colorati, testi piccoli) dove l'inpaint canvas lascia residui."
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  fontSize: 12, color: 'var(--text-dim)', cursor: 'pointer',
+                  userSelect: 'none',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={whiteBackground}
+                  onChange={e => setWhiteBackground(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                Sfondo bianco
+              </label>
               <button className="btn btn-ghost btn-sm" onClick={onReset}>
                 Nuovo PDF
               </button>
