@@ -802,6 +802,102 @@ function rgbToHex({ r, g, b }) {
  * @returns {Promise<{ dataUrl: string, blockColors: Array<string|null> }>}
  *   blockColors[i] is the sampled hex (no '#') for block i, or null if not erased.
  */
+/**
+ * Smart text removal: per ogni text-block, identifica i pixel "diversi dallo
+ * sfondo" (= il testo) e li sostituisce col colore di sfondo dominante della
+ * zona. Mantiene il pattern decorato (strisce, gradienti) intorno al testo.
+ *
+ * Algoritmo:
+ *   1. Per ogni bbox espanso del 8%, leggi i pixel.
+ *   2. Calcola il colore "background" dominante (mediana dei pixel piu' chiari
+ *      = sfondo, escludendo i piu' scuri = inchiostro/testo).
+ *   3. Per ogni pixel, se la sua distanza dal background supera una soglia,
+ *      sostituiscilo col background. Cosi' le lettere spariscono.
+ *
+ * @param {string} origDataUrl
+ * @param {Array} textBlocks normalized bboxes (0-1)
+ * @param {Set<number>} keepIndices
+ * @returns {Promise<{ dataUrl: string }>}
+ */
+async function smartTextRemoval(origDataUrl, textBlocks, keepIndices) {
+  if (!textBlocks || textBlocks.length === 0) {
+    return { dataUrl: origDataUrl };
+  }
+  const img = await loadImage(origDataUrl);
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+
+  const PAD = 0.08; // espansione 8% del bbox per sicurezza
+  const DIST_THRESHOLD = 60; // distanza colore minima per considerare "testo"
+
+  for (let i = 0; i < textBlocks.length; i++) {
+    if (!keepIndices.has(i)) continue;
+    const tb = textBlocks[i];
+    const x0 = (tb.x || 0) * W;
+    const y0 = (tb.y || 0) * H;
+    const w0 = (tb.w || 0) * W;
+    const h0 = (tb.h || 0) * H;
+    const padX = w0 * PAD;
+    const padY = h0 * PAD;
+    const x = Math.max(0, Math.floor(x0 - padX));
+    const y = Math.max(0, Math.floor(y0 - padY));
+    const w = Math.min(W - x, Math.ceil(w0 + padX * 2));
+    const h = Math.min(H - y, Math.ceil(h0 + padY * 2));
+    if (w < 4 || h < 4) continue;
+
+    const region = ctx.getImageData(x, y, w, h);
+    const px = region.data;
+
+    // Step 1: trova il background. Bucketize i pixel per luminosita' (0-255)
+    // e prendi la mediana dei pixel del 60% piu' chiaro (assumendo che il
+    // testo sia piu' scuro dello sfondo, vero quasi sempre).
+    const lumas = [];
+    for (let p = 0; p < px.length; p += 4) {
+      const r = px[p], g = px[p + 1], b = px[p + 2];
+      lumas.push((r * 0.299 + g * 0.587 + b * 0.114) | 0);
+    }
+    lumas.sort((a, b) => a - b);
+    const lightThreshold = lumas[Math.floor(lumas.length * 0.4)] || 128;
+
+    // Mediana dei canali R,G,B sui pixel "chiari" → colore di sfondo
+    const bgR = [], bgG = [], bgB = [];
+    for (let p = 0; p < px.length; p += 4) {
+      const r = px[p], g = px[p + 1], b = px[p + 2];
+      const lum = r * 0.299 + g * 0.587 + b * 0.114;
+      if (lum >= lightThreshold) {
+        bgR.push(r); bgG.push(g); bgB.push(b);
+      }
+    }
+    if (bgR.length === 0) continue;
+    bgR.sort((a, b) => a - b);
+    bgG.sort((a, b) => a - b);
+    bgB.sort((a, b) => a - b);
+    const mid = bgR.length >> 1;
+    const bg = { r: bgR[mid], g: bgG[mid], b: bgB[mid] };
+
+    // Step 2: sostituisci i pixel troppo "scuri" con il bg.
+    // Manhattan distance per velocita'.
+    for (let p = 0; p < px.length; p += 4) {
+      const dr = Math.abs(px[p] - bg.r);
+      const dg = Math.abs(px[p + 1] - bg.g);
+      const db = Math.abs(px[p + 2] - bg.b);
+      if (dr + dg + db > DIST_THRESHOLD) {
+        px[p] = bg.r;
+        px[p + 1] = bg.g;
+        px[p + 2] = bg.b;
+      }
+    }
+    ctx.putImageData(region, x, y);
+  }
+
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92) };
+}
+
 async function clientSideInpaint(origDataUrl, textBlocks, keepIndices, opts = {}) {
   // Modalita' "solo testo": sfondo completamente bianco, niente immagine originale.
   // Garantisce zero residui per slide complesse (pattern, sfondi colorati).
@@ -1030,19 +1126,20 @@ export default function Editor({ onReset }) {
         return;
       }
 
-      // Preview con sfondo bianco: l'utente vede direttamente cio' che
-      // sara' esportato (zero ridondanza tra immagine originale e text-block).
+      // Preview "smart": cancelliamo solo i pixel di testo, mantenendo
+      // lo sfondo decorato (pattern, gradienti, icone). Cosi' l'utente vede
+      // la slide reale con i testi rimossi, pronti per essere editati.
       let cleanedDataUrl = null;
       try {
-        const result = await clientSideInpaint(
+        const allIndices = new Set(textBlocks.map((_, i) => i));
+        const result = await smartTextRemoval(
           slide.origDataUrl,
-          [],
-          new Set(),
-          { whiteOnly: true }
+          textBlocks,
+          allIndices
         );
         cleanedDataUrl = result?.dataUrl || null;
       } catch (err) {
-        console.warn('[runDetection] preview background failed', err);
+        console.warn('[runDetection] smartTextRemoval failed', err);
       }
 
       // Heuristic "complex layout": segnali che l'AI ha probabilmente
@@ -1127,18 +1224,6 @@ export default function Editor({ onReset }) {
     const SLIDE_W = 13.33;
     const SLIDE_H = 7.5;
 
-    // Genera UNA SOLA volta un canvas bianco 16:9 1920x1080 da usare come
-    // sfondo delle slide editabili. Per le slide marcate come "complesse"
-    // (layout che l'AI non e' riuscita a rendere editabile), inseriamo
-    // invece l'immagine originale del PDF come fallback non-editabile.
-    const whiteCanvas = document.createElement('canvas');
-    whiteCanvas.width = 1920;
-    whiteCanvas.height = 1080;
-    const wctx = whiteCanvas.getContext('2d');
-    wctx.fillStyle = '#FFFFFF';
-    wctx.fillRect(0, 0, whiteCanvas.width, whiteCanvas.height);
-    const whiteBgDataUrl = whiteCanvas.toDataURL('image/jpeg', 0.9);
-
     for (const slide of slideSubset) {
       const pSlide = pptx.addSlide();
       const det = slide.detection || {};
@@ -1153,9 +1238,26 @@ export default function Editor({ onReset }) {
         continue;
       }
 
-      // 1) Sfondo bianco unico — UNA sola addImage per slide.
+      // Slide editabili: sfondo = immagine originale con testi rimossi via
+      // threshold-based pixel replacement (smartTextRemoval). Mantiene
+      // pattern/icone/gradienti, cancella solo le lettere.
+      let bgDataUrl = slide.cleanedDataUrl || slide.origDataUrl;
+      // Se la preview non aveva ancora generato il cleanedDataUrl, lo facciamo qui.
+      if (!slide.cleanedDataUrl && (det.textBlocks?.length || 0) > 0) {
+        try {
+          const result = await smartTextRemoval(
+            slide.origDataUrl,
+            det.textBlocks,
+            slide.grabbedTextIndices || new Set()
+          );
+          bgDataUrl = result.dataUrl;
+        } catch (err) {
+          console.warn('[export] smartTextRemoval failed, using original', err);
+        }
+      }
+
       pSlide.addImage({
-        data: whiteBgDataUrl,
+        data: bgDataUrl,
         x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
       });
 
