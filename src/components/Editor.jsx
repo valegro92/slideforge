@@ -1037,19 +1037,44 @@ export default function Editor({ onReset }) {
     for (const slide of slideSubset) {
       const pSlide = pptx.addSlide();
       const det = slide.detection;
-
-      // CRITICAL: only add text/image elements if inpainting succeeded.
-      // If cleanedDataUrl is null, the original image still has text → no overlay allowed.
       const hasCleanBg = !!slide.cleanedDataUrl;
+
+      // 1) Background: usa l'immagine inpainted se disponibile, altrimenti l'originale
       pSlide.addImage({
         data: hasCleanBg ? slide.cleanedDataUrl : slide.origDataUrl,
         x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
       });
 
-      // Skip text and image elements if background still has original text
-      if (!hasCleanBg) continue;
+      // 2) Se NON abbiamo lo sfondo pulito, copriamo il testo originale con
+      //    rettangoli bianchi dietro ogni text-block editabile, cosi' non si
+      //    vedono "doppi testi" (originale stampato + overlay editabile).
+      //    Per NotebookLM il fondo e' tipicamente bianco/chiaro: funziona bene.
+      if (!hasCleanBg && det.textBlocks?.length) {
+        for (const idx of slide.grabbedTextIndices) {
+          const tb = det.textBlocks[idx];
+          if (!tb) continue;
+          let mx = Math.max(0, (tb.x || 0) * SLIDE_W);
+          let my = Math.max(0, (tb.y || 0) * SLIDE_H);
+          let mw = Math.max(0.1, (tb.w || 0.1) * SLIDE_W);
+          let mh = Math.max(0.05, (tb.h || 0.05) * SLIDE_H);
+          if (mx + mw > SLIDE_W) mw = SLIDE_W - mx;
+          if (my + mh > SLIDE_H) mh = SLIDE_H - my;
+          // Espande leggermente la maschera per coprire bene il testo originale
+          const pad = 0.04;
+          mx = Math.max(0, mx - pad);
+          my = Math.max(0, my - pad);
+          mw = Math.min(SLIDE_W - mx, mw + pad * 2);
+          mh = Math.min(SLIDE_H - my, mh + pad * 2);
 
-      // Image regions: crop from ORIGINAL image and add as separate PPTX elements
+          pSlide.addShape('rect', {
+            x: mx, y: my, w: mw, h: mh,
+            fill: { color: 'FFFFFF' },
+            line: { type: 'none' },
+          });
+        }
+      }
+
+      // 3) Image regions: crop from ORIGINAL image and add as separate PPTX elements
       for (const idx of slide.grabbedImageIndices) {
         const region = det.imageRegions[idx];
         if (!region) continue;
