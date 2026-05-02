@@ -1093,129 +1093,35 @@ export default function Editor({ onReset }) {
     const SLIDE_W = 13.33;
     const SLIDE_H = 7.5;
 
+    // Genera UNA SOLA volta un canvas bianco 16:9 1920x1080 da usare come
+    // sfondo per ogni slide del PPTX. Niente origDataUrl, niente cleanedDataUrl,
+    // niente imageRegions: solo bianco + i text-block editabili.
+    const whiteCanvas = document.createElement('canvas');
+    whiteCanvas.width = 1920;
+    whiteCanvas.height = 1080;
+    const wctx = whiteCanvas.getContext('2d');
+    wctx.fillStyle = '#FFFFFF';
+    wctx.fillRect(0, 0, whiteCanvas.width, whiteCanvas.height);
+    const whiteBgDataUrl = whiteCanvas.toDataURL('image/jpeg', 0.9);
+
     for (const slide of slideSubset) {
       const pSlide = pptx.addSlide();
-      const det = slide.detection;
-      const hasAiCleanBg = !!slide.cleanedDataUrl;
-      const hasGrabbedText = (det.textBlocks?.length || 0) > 0
-        && slide.grabbedTextIndices && slide.grabbedTextIndices.size > 0;
+      const det = slide.detection || {};
 
-      // 1) Determina lo sfondo della slide.
-      //    Priorita':
-      //      a) cleanedDataUrl (inpainting Gemini)  → sfondo pulito perfetto
-      //      b) clientSideInpaint (canvas locale)   → cancella il testo
-      //         campionando il colore di sfondo intorno ad ogni text-block.
-      //         Risolve il bug dei "doppi testi" anche su sfondi colorati.
-      //      c) origDataUrl puro (fallback estremo: niente testo grabbato)
-      // Lo sfondo del PPTX e' SEMPRE bianco. L'immagine originale non viene
-      // mai inserita perche' contiene gia' i testi stampati, che si
-      // sovrapporrebbero ai text-block editabili (effetto "doppio testo").
-      // Le icone/foto reali vengono comunque ritagliate dall'originale e
-      // aggiunte come oggetti immagine separati piu' avanti.
-      let bgDataUrl;
-      try {
-        const result = await clientSideInpaint(
-          slide.origDataUrl,
-          [],
-          new Set(),
-          { whiteOnly: true }
-        );
-        bgDataUrl = result.dataUrl;
-      } catch (err) {
-        console.warn('[export] white background failed, falling back to inline white', err);
-        // Fallback: piccolo PNG bianco 1x1 (pptxgen lo scala alla slide)
-        bgDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=';
-      }
-
+      // 1) Sfondo bianco unico — UNA sola addImage per slide.
       pSlide.addImage({
-        data: bgDataUrl,
+        data: whiteBgDataUrl,
         x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
       });
 
-      // 3) Image regions: ritaglia dall'originale solo le imageRegions che NON
-      //    si sovrappongono ai textBlocks editabili. Le imageRegions rilevate
-      //    dall'AI spesso includono "bottoni" decorati (es. header colorati con
-      //    testo dentro): se le ritagliamo cosi' come sono, nel PPTX appaiono
-      //    insieme al text-block editabile sovrastante → effetto doppio testo.
-      const grabbedTexts = (det.textBlocks || []).filter((_, i) => slide.grabbedTextIndices?.has(i));
-
-      const overlapsAnyText = (region) => {
-        const rx0 = region.x || 0;
-        const ry0 = region.y || 0;
-        const rx1 = rx0 + (region.w || 0);
-        const ry1 = ry0 + (region.h || 0);
-        const rArea = Math.max(0, rx1 - rx0) * Math.max(0, ry1 - ry0);
-        if (rArea <= 0) return false;
-        for (const tb of grabbedTexts) {
-          const tx0 = tb.x || 0;
-          const ty0 = tb.y || 0;
-          const tx1 = tx0 + (tb.w || 0);
-          const ty1 = ty0 + (tb.h || 0);
-          const ix = Math.max(0, Math.min(rx1, tx1) - Math.max(rx0, tx0));
-          const iy = Math.max(0, Math.min(ry1, ty1) - Math.max(ry0, ty0));
-          const inter = ix * iy;
-          // Skip se >25% del riquadro immagine e' coperto da un text-block:
-          // l'immagine probabilmente e' un bottone/banner che contiene quel testo.
-          if (inter / rArea > 0.25) return true;
-        }
-        return false;
-      };
-
-      // Carica l'origImg una sola volta (non per ogni region)
-      let origImgCanvas = null;
-      const loadOrig = async () => {
-        if (origImgCanvas) return origImgCanvas;
-        return new Promise((resolve) => {
-          const img = new Image();
-          img.onload = () => {
-            const c = document.createElement('canvas');
-            c.width = img.naturalWidth;
-            c.height = img.naturalHeight;
-            c.getContext('2d').drawImage(img, 0, 0);
-            origImgCanvas = c;
-            resolve(c);
-          };
-          img.src = slide.origDataUrl;
-        });
-      };
-
-      for (const idx of slide.grabbedImageIndices) {
-        const region = det.imageRegions[idx];
-        if (!region) continue;
-        if (overlapsAnyText(region)) continue; // skip: era un bottone con testo
-
-        const origImg = await loadOrig();
-        const cw = origImg.width, ch = origImg.height;
-        const rx = Math.max(0, Math.round((region.x || 0) * cw));
-        const ry = Math.max(0, Math.round((region.y || 0) * ch));
-        const rw = Math.min(cw - rx, Math.round((region.w || 0) * cw));
-        const rh = Math.min(ch - ry, Math.round((region.h || 0) * ch));
-        if (rw < 4 || rh < 4) continue;
-
-        const crop = document.createElement('canvas');
-        crop.width = rw;
-        crop.height = rh;
-        crop.getContext('2d').drawImage(origImg, rx, ry, rw, rh, 0, 0, rw, rh);
-
-        let ix = Math.max(0, (region.x || 0) * SLIDE_W);
-        let iy = Math.max(0, (region.y || 0) * SLIDE_H);
-        let iw = Math.max(0.1, (region.w || 0.1) * SLIDE_W);
-        let ih = Math.max(0.1, (region.h || 0.1) * SLIDE_H);
-        if (ix + iw > SLIDE_W) iw = SLIDE_W - ix;
-        if (iy + ih > SLIDE_H) ih = SLIDE_H - iy;
-
-        pSlide.addImage({
-          data: crop.toDataURL('image/png'),
-          x: ix, y: iy, w: iw, h: ih,
-        });
-      }
-
-      // Editable text boxes with user-edited text
-      for (const idx of slide.grabbedTextIndices) {
-        const tb = det.textBlocks[idx];
+      // 2) Solo i text-block editabili. Niente immagini, niente icone,
+      //    niente region crop dall'originale.
+      const textBlocks = det.textBlocks || [];
+      const grabbed = slide.grabbedTextIndices || new Set();
+      for (const idx of grabbed) {
+        const tb = textBlocks[idx];
         if (!tb) continue;
 
-        // Use edited text if available, otherwise AI-detected text
         const text = (slide.editedTexts && slide.editedTexts[idx] !== undefined)
           ? slide.editedTexts[idx]
           : (tb.text || '');
