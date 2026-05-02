@@ -679,6 +679,75 @@ function loadPdfJs() {
   return pdfJsPromise;
 }
 
+// ─── Tesseract.js loader ─────────────────────────────────────────────────────
+// OCR client-side: estrae testi con bbox precisi pixel-per-pixel.
+// Deterministico, gratis, no API. Sostituisce OpenRouter Vision per il flow
+// editing: l'AI Vision dimenticava testi e sbagliava bbox, Tesseract no.
+
+let tesseractPromise = null;
+
+function loadTesseract() {
+  if (tesseractPromise) return tesseractPromise;
+  tesseractPromise = new Promise((resolve, reject) => {
+    if (window.Tesseract) { resolve(window.Tesseract); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    script.onload = () => {
+      if (window.Tesseract) resolve(window.Tesseract);
+      else reject(new Error('Tesseract not found after load'));
+    };
+    script.onerror = () => reject(new Error('Could not load Tesseract'));
+    document.head.appendChild(script);
+  });
+  return tesseractPromise;
+}
+
+let tesseractWorker = null;
+
+async function getTesseractWorker() {
+  if (tesseractWorker) return tesseractWorker;
+  const Tesseract = await loadTesseract();
+  tesseractWorker = await Tesseract.createWorker(['ita', 'eng']);
+  return tesseractWorker;
+}
+
+/**
+ * Estrae testi da un'immagine via Tesseract OCR.
+ * Restituisce textBlocks normalizzati (0-1) compatibili col formato esistente.
+ */
+async function runOcr(imageDataUrl) {
+  const worker = await getTesseractWorker();
+  const { data } = await worker.recognize(imageDataUrl);
+  const lines = data.lines || [];
+
+  const img = await loadImage(imageDataUrl);
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+
+  return lines
+    .filter(l => l.text && l.text.trim().length > 0 && (l.confidence ?? 100) > 30)
+    .map(l => {
+      const bx = l.bbox.x0 || 0;
+      const by = l.bbox.y0 || 0;
+      const bw = (l.bbox.x1 - l.bbox.x0) || 0;
+      const bh = (l.bbox.y1 - l.bbox.y0) || 0;
+      // Stimo fontSize dal bbox altezza: SLIDE_H = 7.5in = 540pt
+      const fontSize = Math.max(8, Math.min(72, Math.round((bh / H) * 540 * 0.75)));
+      return {
+        text: l.text.replace(/\n/g, ' ').trim(),
+        x: bx / W,
+        y: by / H,
+        w: bw / W,
+        h: bh / H,
+        fontSize,
+        color: '#222222',
+        bold: false,
+        align: 'left',
+        fontFamily: 'Arial',
+      };
+    });
+}
+
 // ─── PptxGenJS loader ────────────────────────────────────────────────────────
 
 let pptxPromise = null;
@@ -987,8 +1056,7 @@ function createSlideState(origDataUrl, width, height) {
     },
     grabbedTextIndices: new Set(),
     grabbedImageIndices: new Set(),
-    editedTexts: {}, // { blockIndex: "edited text" }
-    complexLayout: false,
+    editedTexts: {},
   };
 }
 
@@ -1087,27 +1155,12 @@ export default function Editor({ onReset }) {
 
     try {
       const slide = slides[slideIndex];
-      const resp = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: slide.origDataUrl,
-          email: user?.email,
-        })
-      });
 
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.error || `Errore AI (${resp.status})`);
-      }
+      // OCR client-side: estrae ogni riga di testo con bbox preciso pixel
+      // per pixel. Sostituisce OpenRouter Vision (che dimenticava testi e
+      // sbagliava bbox). Tesseract e' deterministico, completo, gratis.
+      const textBlocks = await runOcr(slide.origDataUrl);
 
-      const data = await resp.json();
-      const textBlocks = Array.isArray(data.textBlocks) ? data.textBlocks : [];
-      const imageRegions = Array.isArray(data.imageRegions) ? data.imageRegions : [];
-
-      // Difesa: se l'AI non ha rilevato alcun testo, NON entriamo in editing
-      // mode (mostrerebbe solo bianco). Restiamo in pristine con un errore
-      // esplicito cosi' l'utente puo' riprovare.
       if (textBlocks.length === 0) {
         setSlides(prev => {
           const next = [...prev];
@@ -1116,7 +1169,7 @@ export default function Editor({ onReset }) {
             mode: 'pristine',
             detection: {
               status: 'error',
-              error: 'Nessun testo rilevato. Riprova oppure passa alla slide successiva.',
+              error: 'Nessun testo rilevato in questa slide.',
               textBlocks: [],
               imageRegions: [],
             },
@@ -1126,57 +1179,34 @@ export default function Editor({ onReset }) {
         return;
       }
 
-      // Preview "smart": cancelliamo solo i pixel di testo, mantenendo
-      // lo sfondo decorato (pattern, gradienti, icone). Cosi' l'utente vede
-      // la slide reale con i testi rimossi, pronti per essere editati.
-      let cleanedDataUrl = null;
-      try {
-        const allIndices = new Set(textBlocks.map((_, i) => i));
-        const result = await smartTextRemoval(
-          slide.origDataUrl,
-          textBlocks,
-          allIndices
-        );
-        cleanedDataUrl = result?.dataUrl || null;
-      } catch (err) {
-        console.warn('[runDetection] smartTextRemoval failed', err);
-      }
-
-      // Heuristic "complex layout": segnali che l'AI ha probabilmente
-      // approssimato male il contenuto della slide.
-      //  - una imageRegion gigante (>50% area) → l'AI ha trattato lo sfondo
-      //    decorato come "immagine" invece di separarne i testi
-      //  - meno di 3 textBlocks → l'AI ha verosimilmente perso del testo
-      const hasGiantRegion = imageRegions.some(
-        (r) => (r.w || 0) * (r.h || 0) > 0.5
-      );
-      const tooFewBlocks = textBlocks.length < 3;
-      const complexLayout = hasGiantRegion || tooFewBlocks;
-
       setSlides(prev => {
         const next = [...prev];
         next[slideIndex] = {
           ...next[slideIndex],
           mode: 'editing',
-          detection: { status: 'done', error: null, textBlocks, imageRegions },
+          detection: { status: 'done', error: null, textBlocks, imageRegions: [] },
           grabbedTextIndices: new Set(textBlocks.map((_, i) => i)),
-          grabbedImageIndices: new Set(imageRegions.map((_, i) => i)),
-          cleanedDataUrl,
-          complexLayout,
+          grabbedImageIndices: new Set(),
+          cleanedDataUrl: null,
         };
         return next;
       });
     } catch (err) {
+      console.error('[runDetection] OCR failed:', err);
       setSlides(prev => {
         const next = [...prev];
         next[slideIndex] = {
           ...next[slideIndex],
-          detection: { ...next[slideIndex].detection, status: 'error', error: err.message }
+          detection: {
+            ...next[slideIndex].detection,
+            status: 'error',
+            error: err.message || 'OCR fallito'
+          }
         };
         return next;
       });
     }
-  }, [slides, tier, user]);
+  }, [slides]);
 
   // ── Batch AI detection: cattura tutte le slide in sequenza ───────────────
 
@@ -1226,45 +1256,12 @@ export default function Editor({ onReset }) {
 
     for (const slide of slideSubset) {
       const pSlide = pptx.addSlide();
-      const det = slide.detection || {};
+      // Sfondo bianco nativo della slide. NESSUNA immagine. Zero ridondanza.
+      pSlide.background = { color: 'FFFFFF' };
 
-      // Slide "complesse": esportiamo l'originale come immagine intera.
-      // Non sara' editabile ma almeno il contenuto e' integro e leggibile.
-      if (slide.complexLayout && slide.origDataUrl) {
-        pSlide.addImage({
-          data: slide.origDataUrl,
-          x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
-        });
-        continue;
-      }
-
-      // Slide editabili: sfondo = immagine originale con testi rimossi via
-      // threshold-based pixel replacement (smartTextRemoval). Mantiene
-      // pattern/icone/gradienti, cancella solo le lettere.
-      let bgDataUrl = slide.cleanedDataUrl || slide.origDataUrl;
-      // Se la preview non aveva ancora generato il cleanedDataUrl, lo facciamo qui.
-      if (!slide.cleanedDataUrl && (det.textBlocks?.length || 0) > 0) {
-        try {
-          const result = await smartTextRemoval(
-            slide.origDataUrl,
-            det.textBlocks,
-            slide.grabbedTextIndices || new Set()
-          );
-          bgDataUrl = result.dataUrl;
-        } catch (err) {
-          console.warn('[export] smartTextRemoval failed, using original', err);
-        }
-      }
-
-      pSlide.addImage({
-        data: bgDataUrl,
-        x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
-      });
-
-      // 2) Solo i text-block editabili. Niente immagini, niente icone,
-      //    niente region crop dall'originale.
-      const textBlocks = det.textBlocks || [];
+      const textBlocks = slide.detection?.textBlocks || [];
       const grabbed = slide.grabbedTextIndices || new Set();
+
       for (const idx of grabbed) {
         const tb = textBlocks[idx];
         if (!tb) continue;
@@ -1272,20 +1269,19 @@ export default function Editor({ onReset }) {
         const text = (slide.editedTexts && slide.editedTexts[idx] !== undefined)
           ? slide.editedTexts[idx]
           : (tb.text || '');
+        if (!text) continue;
 
         let tx = Math.max(0, (tb.x || 0) * SLIDE_W);
         let ty = Math.max(0, (tb.y || 0) * SLIDE_H);
-        let tw = Math.max(0.1, (tb.w || 0.1) * SLIDE_W);
-        let th = Math.max(0.05, (tb.h || 0.05) * SLIDE_H);
+        let tw = Math.max(0.5, (tb.w || 0.1) * SLIDE_W);
+        let th = Math.max(0.25, (tb.h || 0.05) * SLIDE_H);
         if (tx + tw > SLIDE_W) tw = SLIDE_W - tx;
         if (ty + th > SLIDE_H) th = SLIDE_H - ty;
 
-        const color = (tb.color || '#333333').replace('#', '').toUpperCase();
-
         pSlide.addText(text, {
           x: tx, y: ty, w: tw, h: th,
-          fontSize: Math.max(8, Math.min(72, tb.fontSize || 18)),
-          color,
+          fontSize: Math.max(8, Math.min(72, tb.fontSize || 14)),
+          color: (tb.color || '#222222').replace('#', '').toUpperCase(),
           bold: tb.bold === true,
           align: tb.align || 'left',
           fontFace: tb.fontFamily || 'Arial',
@@ -1559,14 +1555,14 @@ function UploadZone({ isDragOver, onDragOver, onDragLeave, onDrop, onClick, maxP
 // ─── SlideCard sub-component ──────────────────────────────────────────────────
 
 function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
-  const { origDataUrl, detection, grabbedTextIndices, grabbedImageIndices, mode, exporting, complexLayout } = slide;
+  const { origDataUrl, detection, grabbedTextIndices, mode, exporting } = slide;
   const det = detection;
   const isLoading = det.status === 'loading';
   const isError = det.status === 'error';
 
-  // Solo due mode raggiungibili: 'pristine' (in attesa) e 'editing' (modificabile).
   const isPristine = mode === 'pristine';
   const isEditing = mode === 'editing';
+  const numText = (det.textBlocks || []).length;
 
   return (
     <div className="slide-wrap">
@@ -1574,39 +1570,26 @@ function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
         Slide {index + 1}
         {isEditing && (
           <span style={{ marginLeft: 8, color: 'var(--accent)', fontWeight: 600 }}>
-            · modalità modifica
-          </span>
-        )}
-        {isEditing && complexLayout && (
-          <span
-            title="L'AI ha rilevato un layout complesso (sfondo decorato, pattern o pochi testi). Verifica il risultato e usa Riprova se serve."
-            style={{
-              marginLeft: 8, color: '#F59E0B', fontWeight: 600,
-              background: 'rgba(245, 158, 11, 0.12)',
-              border: '1px solid rgba(245, 158, 11, 0.4)',
-              padding: '2px 8px', borderRadius: 4, fontSize: 10,
-              letterSpacing: 0.4,
-            }}
-          >
-            ⚠ LAYOUT COMPLESSO — VERIFICA
+            · modalità modifica · {numText} test{numText === 1 ? 'o' : 'i'}
           </span>
         )}
       </div>
 
-      <div className="slide-canvas-wrap">
-        {/* Background image:
-            - slide complessa: mostra l'originale (non-editabile, ma leggibile)
-            - slide editabile: sfondo bianco generato (cleanedDataUrl)
-            - slide pristine: l'originale */}
-        <img
-          className="slide-bg-img"
-          src={isEditing && !complexLayout && slide.cleanedDataUrl ? slide.cleanedDataUrl : origDataUrl}
-          alt={`Slide ${index + 1}`}
-          draggable={false}
-        />
+      <div className="slide-canvas-wrap" style={isEditing ? { background: '#FFFFFF' } : undefined}>
+        {/* Background:
+            - editing: sfondo bianco puro (no immagine, no overlay)
+            - pristine: anteprima del PDF originale */}
+        {!isEditing && (
+          <img
+            className="slide-bg-img"
+            src={origDataUrl}
+            alt={`Slide ${index + 1}`}
+            draggable={false}
+          />
+        )}
 
-        {/* Editing mode: editable text blocks on cleaned background */}
-        {isEditing && !complexLayout && (
+        {/* Editing mode: text-block editabili su sfondo bianco */}
+        {isEditing && (
           <div className="slide-overlay" style={{ pointerEvents: 'auto' }}>
             {det.textBlocks.map((tb, bi) => (
               grabbedTextIndices.has(bi) && (
@@ -1688,10 +1671,8 @@ function SlideCard({ slide, index, onDetect, onExportSlide, onUpdateText }) {
         {/* Editing mode actions: Download PPTX */}
         {isEditing && (
           <div className="editing-toolbar">
-            <span style={{ fontSize: 12, color: complexLayout ? '#F59E0B' : 'var(--text-dim)' }}>
-              {complexLayout
-                ? 'Layout troppo complesso: la slide verra\' esportata come immagine non modificabile'
-                : 'Clicca sul testo per modificarlo'}
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+              Clicca sul testo per modificarlo
             </span>
             <div style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.1)' }} />
             <button
