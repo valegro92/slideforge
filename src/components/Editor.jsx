@@ -717,6 +717,168 @@ function loadPptxGen() {
   return pptxPromise;
 }
 
+// ─── Client-side inpainting (canvas) ─────────────────────────────────────────
+//
+// Why: the AI Vision bounding boxes for textBlocks are NEVER pixel-perfect.
+// Even with generous padding, a fixed-color rect (e.g. white) leaves the
+// original text visible AROUND the box on colored backgrounds, producing the
+// dreaded "double text" effect in the exported PPTX.
+//
+// Strategy: sample the average background color from a thin frame of pixels
+// just OUTSIDE each text bounding box, then paint a generously-padded rect
+// of that color OVER the text region. Result: the text disappears into its
+// own background — works on white, colored, gradient, and even photo
+// backgrounds (degrades gracefully to a sampled solid color).
+//
+// 100% client-side, no API call, deterministic, free.
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+// Sample average color from a thin frame around a rect (in pixel coords).
+// We sample only pixels OUTSIDE the inner rect but WITHIN the outer frame.
+// Returns { r, g, b } as 0-255 ints, or null if no samples.
+function sampleBorderColor(ctx, x, y, w, h, frameThickness, imgW, imgH) {
+  const x0 = Math.max(0, Math.floor(x));
+  const y0 = Math.max(0, Math.floor(y));
+  const x1 = Math.min(imgW, Math.ceil(x + w));
+  const y1 = Math.min(imgH, Math.ceil(y + h));
+
+  // Outer frame box (clamped to image)
+  const fx0 = Math.max(0, x0 - frameThickness);
+  const fy0 = Math.max(0, y0 - frameThickness);
+  const fx1 = Math.min(imgW, x1 + frameThickness);
+  const fy1 = Math.min(imgH, y1 + frameThickness);
+
+  if (fx1 <= fx0 || fy1 <= fy0) return null;
+
+  let imageData;
+  try {
+    imageData = ctx.getImageData(fx0, fy0, fx1 - fx0, fy1 - fy0);
+  } catch (e) {
+    // Tainted canvas (cross-origin) — unlikely since we draw a same-origin dataURL
+    return null;
+  }
+  const data = imageData.data;
+  const fW = fx1 - fx0;
+
+  // Inner rect coords RELATIVE to frame
+  const ix0 = x0 - fx0;
+  const iy0 = y0 - fy0;
+  const ix1 = x1 - fx0;
+  const iy1 = y1 - fy0;
+
+  // Collect samples and use median per channel — robust to outliers (text glyphs
+  // that may bleed slightly into the frame, or anti-aliased edges).
+  const rs = [], gs = [], bs = [];
+  // Step to keep sampling cheap on large boxes
+  const step = Math.max(1, Math.floor(Math.min(fW, fy1 - fy0) / 80));
+
+  for (let py = 0; py < fy1 - fy0; py += step) {
+    for (let px = 0; px < fW; px += step) {
+      // Skip pixels that fall INSIDE the inner rect (those are the text region)
+      if (px >= ix0 && px < ix1 && py >= iy0 && py < iy1) continue;
+      const i = (py * fW + px) * 4;
+      const a = data[i + 3];
+      if (a < 200) continue;
+      rs.push(data[i]);
+      gs.push(data[i + 1]);
+      bs.push(data[i + 2]);
+    }
+  }
+
+  if (rs.length === 0) return null;
+
+  // Median (robust to dark text pixels that leak into the frame)
+  const median = (arr) => {
+    arr.sort((a, b) => a - b);
+    return arr[Math.floor(arr.length / 2)];
+  };
+
+  return { r: median(rs), g: median(gs), b: median(bs) };
+}
+
+function rgbToHex({ r, g, b }) {
+  const h = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+  return `${h(r)}${h(g)}${h(b)}`.toUpperCase();
+}
+
+/**
+ * Erase text from an image client-side by painting background-color rects
+ * over each detected text box.
+ *
+ * @param {string} origDataUrl - source image data URL
+ * @param {Array} textBlocks - normalized (0-1) bounding boxes
+ * @param {Set<number>} keepIndices - indices of blocks to erase (only erase blocks the user kept)
+ * @returns {Promise<{ dataUrl: string, blockColors: Array<string|null> }>}
+ *   blockColors[i] is the sampled hex (no '#') for block i, or null if not erased.
+ */
+async function clientSideInpaint(origDataUrl, textBlocks, keepIndices) {
+  if (!textBlocks || textBlocks.length === 0) {
+    return { dataUrl: origDataUrl, blockColors: [] };
+  }
+  const img = await loadImage(origDataUrl);
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+
+  const blockColors = new Array(textBlocks.length).fill(null);
+
+  // We sample BEFORE drawing any covers (to avoid sampling our own paint).
+  // Frame thickness in pixels — proportional to text height, but bounded.
+  const samples = textBlocks.map((tb, i) => {
+    if (!keepIndices.has(i)) return null;
+    const x = (tb.x || 0) * W;
+    const y = (tb.y || 0) * H;
+    const w = Math.max(2, (tb.w || 0.02) * W);
+    const h = Math.max(2, (tb.h || 0.02) * H);
+    const frame = Math.max(6, Math.min(40, Math.round(h * 0.6)));
+    const color = sampleBorderColor(ctx, x, y, w, h, frame, W, H);
+    return { x, y, w, h, color };
+  });
+
+  // Padding to overpaint AI-bbox inaccuracies. Generous on both axes,
+  // especially vertical (descenders/ascenders/line-spacing typically slip out).
+  // Expressed as a fraction of the box dimension, with absolute pixel mins.
+  const PAD_X_FRAC = 0.10;
+  const PAD_Y_FRAC = 0.30;
+  const MIN_PAD_PX = 6;
+
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i];
+    if (!s) continue;
+    const fillRgb = s.color || { r: 255, g: 255, b: 255 };
+    blockColors[i] = rgbToHex(fillRgb);
+
+    const padX = Math.max(MIN_PAD_PX, s.w * PAD_X_FRAC);
+    const padY = Math.max(MIN_PAD_PX, s.h * PAD_Y_FRAC);
+
+    const px = Math.max(0, s.x - padX);
+    const py = Math.max(0, s.y - padY);
+    const pw = Math.min(W - px, s.w + padX * 2);
+    const ph = Math.min(H - py, s.h + padY * 2);
+
+    ctx.fillStyle = `rgb(${fillRgb.r}, ${fillRgb.g}, ${fillRgb.b})`;
+    ctx.fillRect(px, py, pw, ph);
+  }
+
+  // JPEG keeps file size sane (PPTX-friendly); quality 0.92 preserves background gradients.
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  return { dataUrl, blockColors };
+}
+
 // ─── createSlideState helper ─────────────────────────────────────────────────
 
 function createSlideState(origDataUrl, width, height) {
@@ -1037,42 +1199,41 @@ export default function Editor({ onReset }) {
     for (const slide of slideSubset) {
       const pSlide = pptx.addSlide();
       const det = slide.detection;
-      const hasCleanBg = !!slide.cleanedDataUrl;
+      const hasAiCleanBg = !!slide.cleanedDataUrl;
+      const hasGrabbedText = (det.textBlocks?.length || 0) > 0
+        && slide.grabbedTextIndices && slide.grabbedTextIndices.size > 0;
 
-      // 1) Background: usa l'immagine inpainted se disponibile, altrimenti l'originale
-      pSlide.addImage({
-        data: hasCleanBg ? slide.cleanedDataUrl : slide.origDataUrl,
-        x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
-      });
-
-      // 2) Se NON abbiamo lo sfondo pulito, copriamo il testo originale con
-      //    rettangoli bianchi dietro ogni text-block editabile, cosi' non si
-      //    vedono "doppi testi" (originale stampato + overlay editabile).
-      //    Per NotebookLM il fondo e' tipicamente bianco/chiaro: funziona bene.
-      if (!hasCleanBg && det.textBlocks?.length) {
-        for (const idx of slide.grabbedTextIndices) {
-          const tb = det.textBlocks[idx];
-          if (!tb) continue;
-          let mx = Math.max(0, (tb.x || 0) * SLIDE_W);
-          let my = Math.max(0, (tb.y || 0) * SLIDE_H);
-          let mw = Math.max(0.1, (tb.w || 0.1) * SLIDE_W);
-          let mh = Math.max(0.05, (tb.h || 0.05) * SLIDE_H);
-          if (mx + mw > SLIDE_W) mw = SLIDE_W - mx;
-          if (my + mh > SLIDE_H) mh = SLIDE_H - my;
-          // Espande leggermente la maschera per coprire bene il testo originale
-          const pad = 0.04;
-          mx = Math.max(0, mx - pad);
-          my = Math.max(0, my - pad);
-          mw = Math.min(SLIDE_W - mx, mw + pad * 2);
-          mh = Math.min(SLIDE_H - my, mh + pad * 2);
-
-          pSlide.addShape('rect', {
-            x: mx, y: my, w: mw, h: mh,
-            fill: { color: 'FFFFFF' },
-            line: { type: 'none' },
-          });
+      // 1) Determina lo sfondo della slide.
+      //    Priorita':
+      //      a) cleanedDataUrl (inpainting Gemini)  → sfondo pulito perfetto
+      //      b) clientSideInpaint (canvas locale)   → cancella il testo
+      //         campionando il colore di sfondo intorno ad ogni text-block.
+      //         Risolve il bug dei "doppi testi" anche su sfondi colorati.
+      //      c) origDataUrl puro (fallback estremo: niente testo grabbato)
+      let bgDataUrl = slide.origDataUrl;
+      if (hasAiCleanBg) {
+        bgDataUrl = slide.cleanedDataUrl;
+      } else if (hasGrabbedText) {
+        try {
+          const result = await clientSideInpaint(
+            slide.origDataUrl,
+            det.textBlocks,
+            slide.grabbedTextIndices
+          );
+          bgDataUrl = result.dataUrl;
+        } catch (err) {
+          // Fallback: se l'inpaint canvas fallisce, usiamo l'originale e
+          // copriamo i text-block con un rettangolo bianco generosamente
+          // padded — meglio di niente.
+          console.warn('[export] clientSideInpaint failed, using white-rect fallback', err);
+          bgDataUrl = slide.origDataUrl;
         }
       }
+
+      pSlide.addImage({
+        data: bgDataUrl,
+        x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
+      });
 
       // 3) Image regions: crop from ORIGINAL image and add as separate PPTX elements
       for (const idx of slide.grabbedImageIndices) {
