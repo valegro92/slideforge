@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import LoginModal from './LoginModal';
 import { useTier } from '../lib/TierContext';
 
@@ -25,6 +26,7 @@ const LandingPage = () => {
   const [visibleSections, setVisibleSections] = useState({});
   const [showLoginModal, setShowLoginModal] = useState(false);
   const { login, isLoggedIn, user, logout } = useTier();
+  const router = useRouter();
 
   useEffect(() => {
     const handleScroll = () => setScrollY(window.scrollY);
@@ -56,6 +58,7 @@ const LandingPage = () => {
   const handleLogin = ({ email, tier }) => {
     login({ email, tier });
     setShowLoginModal(false);
+    router.push('/app');
   };
 
   const fadeIn = (id) => ({
@@ -942,12 +945,11 @@ const LandingPage = () => {
       </footer>
 
       {/* ── Login Modal ─────────────────────────────────────────── */}
-      {showLoginModal && (
-        <LoginModal
-          onClose={() => setShowLoginModal(false)}
-          onLogin={handleLogin}
-        />
-      )}
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onLogin={handleLogin}
+      />
     </div>
   );
 };
