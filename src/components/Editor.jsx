@@ -155,7 +155,9 @@ function loadImage(src) {
   });
 }
 
-async function smartTextRemoval(origDataUrl, textBlocks) {
+// Covers each text block with a solid fill of the sampled background colour.
+// fillRect is guaranteed to cover all text — no pixel thresholds, no edge cases.
+async function fillTextAreas(origDataUrl, textBlocks) {
   if (!textBlocks || textBlocks.length === 0) return origDataUrl;
 
   const img = await loadImage(origDataUrl);
@@ -169,11 +171,9 @@ async function smartTextRemoval(origDataUrl, textBlocks) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
 
-  const PAD = 0.20;            // 20% expansion around each bbox
-  const BORDER = 10;           // pixels of border strip used to sample background
-  const DIST_THRESHOLD = 100;  // colour distance threshold to classify as "text"
+  const PAD = 0.15;   // 15% padding around each bbox
+  const BORDER = 12;  // border strip width (px) for background sampling
 
-  // Returns median RGB from a rectangular strip, or null if out of bounds.
   function stripMedian(sx, sy, sw, sh) {
     if (sw <= 0 || sh <= 0 || sx < 0 || sy < 0 || sx + sw > W || sy + sh > H) return null;
     const d = ctx.getImageData(sx, sy, sw, sh).data;
@@ -190,23 +190,20 @@ async function smartTextRemoval(origDataUrl, textBlocks) {
     const w0 = Math.ceil(Math.max(4, (tb.w || 0) * W));
     const h0 = Math.ceil(Math.max(4, (tb.h || 0) * H));
 
-    // Estimate how many visual lines the text wraps to.
-    // h0 = one em; avg char width ≈ 0.55 em. Wrapped lines need h0 * numLines erased.
-    const avgCharW = Math.max(1, h0 * 0.55);
-    const charsPerLine = Math.max(1, Math.floor(w0 / avgCharW));
+    // Estimate wrapped lines so the fill covers multi-line paragraphs.
+    const charsPerLine = Math.max(1, Math.floor(w0 / Math.max(1, h0 * 0.55)));
     const numLines = Math.max(1, Math.ceil((tb.text || '').trim().length / charsPerLine));
-    const h0eff = Math.ceil(h0 * numLines * 1.25); // 1.25 = line-height factor
+    const h0eff = Math.ceil(h0 * numLines * 1.25);
 
     const padX = Math.ceil(w0 * PAD);
     const padY = Math.ceil(h0 * PAD);
     const rx = Math.max(0, x0 - padX);
     const ry = Math.max(0, y0 - padY);
     const rw = Math.min(W - rx, w0 + padX * 2);
-    const rh = Math.min(H - ry, h0eff + padY * 2); // use h0eff, not h0
+    const rh = Math.min(H - ry, h0eff + padY * 2);
     if (rw < 2 || rh < 2) continue;
 
-    // Estimate background from a thin strip OUTSIDE the removal box.
-    // This avoids contamination by text pixels inside the box.
+    // Sample background from the border strip AROUND the fill area.
     const strips = [
       stripMedian(rx, Math.max(0, ry - BORDER), rw, Math.min(BORDER, ry)),
       stripMedian(rx, ry + rh, rw, Math.min(BORDER, H - ry - rh)),
@@ -214,42 +211,16 @@ async function smartTextRemoval(origDataUrl, textBlocks) {
       stripMedian(rx + rw, ry, Math.min(BORDER, W - rx - rw), rh),
     ].filter(Boolean);
 
-    let bgR, bgG, bgB;
+    let bgR = 255, bgG = 255, bgB = 255;
     if (strips.length > 0) {
       bgR = (strips.reduce((s, c) => s + c.r, 0) / strips.length) | 0;
       bgG = (strips.reduce((s, c) => s + c.g, 0) / strips.length) | 0;
       bgB = (strips.reduce((s, c) => s + c.b, 0) / strips.length) | 0;
-    } else {
-      // Fallback: use the lighter 60% of the region itself.
-      const d0 = ctx.getImageData(rx, ry, rw, rh).data;
-      const lumas = [];
-      for (let p = 0; p < d0.length; p += 4)
-        lumas.push((d0[p] * 0.299 + d0[p + 1] * 0.587 + d0[p + 2] * 0.114) | 0);
-      lumas.sort((a, b) => a - b);
-      const lt = lumas[Math.floor(lumas.length * 0.4)] || 128;
-      const R2 = [], G2 = [], B2 = [];
-      for (let p = 0; p < d0.length; p += 4) {
-        if (d0[p] * 0.299 + d0[p + 1] * 0.587 + d0[p + 2] * 0.114 >= lt) {
-          R2.push(d0[p]); G2.push(d0[p + 1]); B2.push(d0[p + 2]);
-        }
-      }
-      if (R2.length === 0) continue;
-      R2.sort((a, b) => a - b); G2.sort((a, b) => a - b); B2.sort((a, b) => a - b);
-      const m2 = R2.length >> 1;
-      bgR = R2[m2]; bgG = G2[m2]; bgB = B2[m2];
     }
 
-    const region = ctx.getImageData(rx, ry, rw, rh);
-    const px = region.data;
-    for (let p = 0; p < px.length; p += 4) {
-      const dr = Math.abs(px[p] - bgR);
-      const dg = Math.abs(px[p + 1] - bgG);
-      const db = Math.abs(px[p + 2] - bgB);
-      if (dr + dg + db > DIST_THRESHOLD) {
-        px[p] = bgR; px[p + 1] = bgG; px[p + 2] = bgB;
-      }
-    }
-    ctx.putImageData(region, rx, ry);
+    // Single fillRect — covers all text pixels unconditionally.
+    ctx.fillStyle = `rgb(${bgR},${bgG},${bgB})`;
+    ctx.fillRect(rx, ry, rw, rh);
   }
 
   return canvas.toDataURL('image/jpeg', 0.92);
@@ -407,7 +378,7 @@ export default function Editor({ onReset }) {
         setProgress({ done: 0, total: numPages, label: 'Pulisco i testi originali dalle immagini...' });
         const result = [];
         for (let i = 0; i < pages.length; i++) {
-          const cleaned = await smartTextRemoval(pages[i].dataUrl, pages[i].directBlocks);
+          const cleaned = await fillTextAreas(pages[i].dataUrl, pages[i].directBlocks);
           result.push(makeSlide(pages[i].dataUrl, cleaned, pages[i].directBlocks));
           setProgress({ done: i + 1, total: numPages, label: `Pulizia ${i + 1} / ${numPages}` });
         }
@@ -423,7 +394,7 @@ export default function Editor({ onReset }) {
         setProgress({ done: i, total: numPages, label: `AI estrae testi: pagina ${i + 1} / ${numPages}` });
         try {
           const blocks = await extractTextViaAI(pages[i].dataUrl, user?.email, tier);
-          const cleaned = await smartTextRemoval(pages[i].dataUrl, blocks);
+          const cleaned = await fillTextAreas(pages[i].dataUrl, blocks);
           result.push(makeSlide(pages[i].dataUrl, cleaned, blocks));
         } catch (err) {
           console.error('AI extraction failed for page', i + 1, err);
@@ -706,7 +677,7 @@ function SlideCard({ slide, index, onUpdateText }) {
   const ptToPx = H / 540;
   const textColor = darkBg ? '#f0f0f0' : '#111111';
 
-  // Estimate visual line count for a text block (mirrors smartTextRemoval logic).
+  // Estimate visual line count for a text block (mirrors fillTextAreas logic).
   function estimateLines(tb) {
     const blockWpx = Math.max(1, (tb.w || 0.1) * W);
     const fontPx = Math.max(8, (tb.fontSize || 14) * ptToPx);
@@ -739,7 +710,7 @@ function SlideCard({ slide, index, onUpdateText }) {
           const lines = estimateLines(tb);
           const fontPx = Math.max(11, (tb.fontSize || 14) * ptToPx);
           // Height covers all estimated wrapped lines with 1.25 line-height,
-          // matching the erasure area calculated in smartTextRemoval.
+          // matching the erasure area calculated in fillTextAreas.
           const blockHeightPct = Math.max(1.5, (tb.h || 0) * 100 * lines * 1.25);
           return (
             <div key={bi} contentEditable suppressContentEditableWarning
