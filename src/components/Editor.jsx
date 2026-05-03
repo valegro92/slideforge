@@ -331,7 +331,14 @@ export default function Editor({ onReset }) {
   const [fileName, setFileName] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
   const [globalError, setGlobalError] = useState(null);
+  const [libreofficeReady, setLibreofficeReady] = useState(false);
   const fileInputRef = useRef(null);
+  const pdfFileRef = useRef(null);
+
+  // Detect once whether the LibreOffice service is configured on the server.
+  useEffect(() => {
+    fetch('/api/pdf-to-pptx').then(r => r.json()).then(d => setLibreofficeReady(!!d.configured)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const id = 'ed-styles';
@@ -345,6 +352,7 @@ export default function Editor({ onReset }) {
   const processFile = useCallback(async (file) => {
     setPhase('processing');
     setFileName(file.name.replace(/\.pdf$/i, ''));
+    pdfFileRef.current = file;
     setProgress({ done: 0, total: 0, label: 'Caricamento PDF...' });
     setGlobalError(null);
     try {
@@ -430,6 +438,43 @@ export default function Editor({ onReset }) {
         : s
     ));
   }, []);
+
+  // High-quality vector conversion via the external LibreOffice service.
+  // Sends the ORIGINAL PDF (not the rasterised slides) so every shape, text run
+  // and image becomes a native PowerPoint object.
+  const exportVectorPptx = useCallback(async () => {
+    if (!pdfFileRef.current) {
+      setGlobalError('PDF originale non disponibile. Ricarica il file.');
+      return;
+    }
+    setPhase('exporting');
+    setGlobalError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', pdfFileRef.current, pdfFileRef.current.name || 'input.pdf');
+      fd.append('email', user?.email || '');
+      const resp = await fetch('/api/pdf-to-pptx', { method: 'POST', body: fd });
+      if (!resp.ok) {
+        const errBody = await resp.json().catch(() => ({}));
+        throw new Error(errBody.error || `HTTP ${resp.status}`);
+      }
+      const blob = await resp.blob();
+      const dlUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      const safe = (fileName || 'slideforge').replace(/[^a-z0-9_-]/gi, '_');
+      a.download = `${safe}_vector.pptx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(dlUrl);
+      setPhase('done');
+    } catch (err) {
+      console.error('vector export error:', err);
+      setGlobalError(`Errore conversione vettoriale: ${err.message}`);
+      setPhase('editing');
+    }
+  }, [fileName, user]);
 
   const exportPptx = useCallback(async () => {
     setPhase('exporting');
@@ -543,6 +588,14 @@ export default function Editor({ onReset }) {
           {phase === 'editing' && (
             <>
               <button className="btn btn-ghost btn-sm" onClick={onReset}>Nuovo PDF</button>
+              {libreofficeReady && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={exportVectorPptx}
+                  title="Conversione vettoriale tramite LibreOffice — qualità più alta, ogni elemento del PDF diventa un oggetto PowerPoint nativo">
+                  <IconDownload /> PPTX vettoriale
+                </button>
+              )}
               <button className="btn btn-primary btn-sm" onClick={exportPptx}>
                 <IconDownload /> Scarica PPTX
               </button>
