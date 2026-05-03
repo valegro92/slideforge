@@ -375,7 +375,7 @@ export default function Editor({ onReset }) {
       setProgress({ done: 0, total: numPages, label: 'PDF tipo immagine: uso AI Vision...' });
       const result = new Array(pages.length);
       let done = 0;
-      const CONCURRENCY = 3;
+      const CONCURRENCY = 2;
       for (let start = 0; start < pages.length; start += CONCURRENCY) {
         const batch = pages.slice(start, start + CONCURRENCY);
         await Promise.all(batch.map(async (p, j) => {
@@ -429,10 +429,23 @@ export default function Editor({ onReset }) {
     setPhase('exporting');
     setGlobalError(null);
     try {
+      // Get a direct upload token to bypass Vercel's 4.5MB body limit.
+      const tokenResp = await fetch('/api/lo-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user?.email || '' }),
+      });
+      if (!tokenResp.ok) throw new Error(`token ${tokenResp.status}`);
+      const { endpoint, token } = await tokenResp.json();
+
+      // Upload directly from the browser to the LibreOffice service.
       const fd = new FormData();
       fd.append('file', pdfFileRef.current, pdfFileRef.current.name || 'input.pdf');
-      fd.append('email', user?.email || '');
-      const resp = await fetch('/api/pdf-to-pptx', { method: 'POST', body: fd });
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      });
       if (!resp.ok) {
         const errBody = await resp.json().catch(() => ({}));
         throw new Error(errBody.error || `HTTP ${resp.status}`);
