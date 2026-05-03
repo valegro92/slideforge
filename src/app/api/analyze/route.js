@@ -40,8 +40,8 @@ const RATE_LIMITS = {
 
 // Primary model — others are tried automatically as fallback inside openrouter.js.
 const DEFAULT_MODELS = {
-  pro: 'mistralai/mistral-small-3.2-24b-instruct:free',
-  enterprise: 'mistralai/mistral-small-3.2-24b-instruct:free',
+  pro: 'nvidia/nemotron-nano-12b-v2-vl:free',
+  enterprise: 'nvidia/nemotron-nano-12b-v2-vl:free',
 };
 
 function getModelForTier(tier) {

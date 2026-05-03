@@ -14,9 +14,11 @@ export const TIERS = {
     name: 'Pro',
     maxPages: 50,
     models: [
+      'nvidia/nemotron-nano-12b-v2-vl:free',
       'mistralai/mistral-small-3.2-24b-instruct:free',
       'google/gemma-3-27b-it:free',
-      'nvidia/nemotron-nano-12b-v2-vl:free',
+      'meta-llama/llama-4-maverick:free',
+      'qwen/qwen2.5-vl-72b-instruct:free',
       'google/gemini-2.5-flash',
       'qwen/qwen2.5-vl-72b-instruct',
       'google/gemini-2.0-flash-001'
@@ -36,9 +38,11 @@ export const TIERS = {
     name: 'Enterprise',
     maxPages: 200,
     models: [
+      'nvidia/nemotron-nano-12b-v2-vl:free',
       'mistralai/mistral-small-3.2-24b-instruct:free',
       'google/gemma-3-27b-it:free',
-      'nvidia/nemotron-nano-12b-v2-vl:free',
+      'meta-llama/llama-4-maverick:free',
+      'qwen/qwen2.5-vl-72b-instruct:free',
       'google/gemini-2.5-flash',
       'qwen/qwen2.5-vl-72b-instruct',
       'google/gemini-2.0-flash-001'

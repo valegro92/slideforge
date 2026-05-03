@@ -41,12 +41,14 @@ REGOLE:
 
 const PER_REQUEST_TIMEOUT_MS = 25000;
 
-// Fallback chain of free vision models, tried in order. If the first one is
-// slow/rate-limited, the second/third gets a chance. All free.
+// Fallback chain of free vision models, tried in order.
+// nemotron first — confirmed working; others as backup.
 const FALLBACK_MODELS = [
+  'nvidia/nemotron-nano-12b-v2-vl:free',
   'mistralai/mistral-small-3.2-24b-instruct:free',
   'google/gemma-3-27b-it:free',
-  'nvidia/nemotron-nano-12b-v2-vl:free',
+  'meta-llama/llama-4-maverick:free',
+  'qwen/qwen2.5-vl-72b-instruct:free',
 ];
 
 async function fetchWithTimeout(url, options, timeoutMs) {
@@ -115,10 +117,11 @@ export async function callOpenRouter(apiKey, model, dataUrl) {
       lastError = new Error(`Model ${m} returned no text blocks`);
     } catch (e) {
       lastError = e;
-      // Retryable? 429/5xx → try next model. AbortError too.
       const status = e.status || 0;
-      const retryable = status === 429 || status >= 500 || e.name === 'AbortError';
-      if (!retryable) throw e;
+      // Only a hard 401 (invalid API key) is non-retryable.
+      // 400/403 = model not available for this key → try next model.
+      // 429/5xx/AbortError → transient, try next model.
+      if (status === 401) throw e;
     }
   }
   throw lastError || new Error('All OpenRouter models failed');
