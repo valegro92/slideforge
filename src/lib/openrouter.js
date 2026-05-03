@@ -17,7 +17,7 @@ COORDINATE — frazioni delle dimensioni dell'immagine (0.0-1.0):
 - "w": larghezza testo / larghezza immagine
 - "h": altezza testo / altezza immagine
 
-Restituisci JSON con UN SOLO array "textBlocks". Niente "imageRegions", niente altro.
+Restituisci JSON con due campi: "bgColor" (colore di sfondo dominante della slide come "#RRGGBB") e "textBlocks" (array).
 
 Ogni textBlock:
 {
@@ -131,6 +131,7 @@ function parseJsonResponse(text) {
   }
 
   if (!Array.isArray(parsed.textBlocks)) parsed.textBlocks = [];
+  if (typeof parsed.bgColor !== 'string') parsed.bgColor = '';
   return parsed;
 }
 
@@ -162,9 +163,12 @@ export function validateResponse(response) {
         ? tb.fontFamily.trim() : 'Arial',
     }));
 
+  const bgColor = typeof response.bgColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(response.bgColor)
+    ? response.bgColor : '';
+
   return {
     valid: true,
     warnings: [],
-    normalized: { textBlocks, imageRegions: [] },
+    normalized: { textBlocks, imageRegions: [], bgColor },
   };
 }

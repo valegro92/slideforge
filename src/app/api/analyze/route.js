@@ -34,8 +34,8 @@ const RATE_LIMITS = {
 };
 
 const DEFAULT_MODELS = {
-  pro: 'google/gemini-2.5-flash',
-  enterprise: 'google/gemini-2.5-flash',
+  pro: 'nvidia/nemotron-nano-12b-v2-vl:free',
+  enterprise: 'nvidia/nemotron-nano-12b-v2-vl:free',
 };
 
 function getModelForTier(tier) {

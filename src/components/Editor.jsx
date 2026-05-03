@@ -155,15 +155,40 @@ function loadImage(src) {
   });
 }
 
-// Covers each text block with a solid fill of the sampled background colour.
-// fillRect is guaranteed to cover all text — no pixel thresholds, no edge cases.
+// Sample the dominant slide background colour from the 4 corner patches.
+// Returns { r, g, b } and the resulting hex string for downstream use.
+function sampleSlideBgFromCanvas(ctx, W, H) {
+  const S = Math.min(40, Math.floor(Math.min(W, H) * 0.04));
+  const patches = [
+    [0, 0],
+    [W - S, 0],
+    [0, H - S],
+    [W - S, H - S],
+  ];
+  const R = [], G = [], B = [];
+  for (const [px, py] of patches) {
+    const d = ctx.getImageData(px, py, S, S).data;
+    for (let i = 0; i < d.length; i += 4) {
+      R.push(d[i]); G.push(d[i + 1]); B.push(d[i + 2]);
+    }
+  }
+  R.sort((a, b) => a - b); G.sort((a, b) => a - b); B.sort((a, b) => a - b);
+  const m = R.length >> 1;
+  const r = R[m], g = G[m], b = B[m];
+  return { r, g, b, hex: `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}` };
+}
+
+// Covers each text block with a solid fill of the slide's global background colour.
+// Using one consistent colour (sampled from the 4 corners) gives uniform patches
+// instead of per-block patches with slight colour drifts.
+// Returns { dataUrl, bgHex } so the caller can reuse the bg colour downstream.
 async function fillTextAreas(origDataUrl, textBlocks) {
-  if (!textBlocks || textBlocks.length === 0) return origDataUrl;
+  if (!textBlocks || textBlocks.length === 0) return { dataUrl: origDataUrl, bgHex: '#ffffff' };
 
   const img = await loadImage(origDataUrl);
   const W = img.naturalWidth;
   const H = img.naturalHeight;
-  if (!W || !H) return origDataUrl;
+  if (!W || !H) return { dataUrl: origDataUrl, bgHex: '#ffffff' };
 
   const canvas = document.createElement('canvas');
   canvas.width = W;
@@ -171,18 +196,11 @@ async function fillTextAreas(origDataUrl, textBlocks) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
 
-  const PAD = 0.15;   // 15% padding around each bbox
-  const BORDER = 12;  // border strip width (px) for background sampling
+  // ONE global background colour for the whole slide → uniform patches.
+  const bg = sampleSlideBgFromCanvas(ctx, W, H);
+  ctx.fillStyle = `rgb(${bg.r},${bg.g},${bg.b})`;
 
-  function stripMedian(sx, sy, sw, sh) {
-    if (sw <= 0 || sh <= 0 || sx < 0 || sy < 0 || sx + sw > W || sy + sh > H) return null;
-    const d = ctx.getImageData(sx, sy, sw, sh).data;
-    const R = [], G = [], B = [];
-    for (let p = 0; p < d.length; p += 4) { R.push(d[p]); G.push(d[p + 1]); B.push(d[p + 2]); }
-    R.sort((a, b) => a - b); G.sort((a, b) => a - b); B.sort((a, b) => a - b);
-    const m = R.length >> 1;
-    return { r: R[m], g: G[m], b: B[m] };
-  }
+  const PAD = 0.15;
 
   for (const tb of textBlocks) {
     const x0 = Math.floor((tb.x || 0) * W);
@@ -203,27 +221,10 @@ async function fillTextAreas(origDataUrl, textBlocks) {
     const rh = Math.min(H - ry, h0eff + padY * 2);
     if (rw < 2 || rh < 2) continue;
 
-    // Sample background from the border strip AROUND the fill area.
-    const strips = [
-      stripMedian(rx, Math.max(0, ry - BORDER), rw, Math.min(BORDER, ry)),
-      stripMedian(rx, ry + rh, rw, Math.min(BORDER, H - ry - rh)),
-      stripMedian(Math.max(0, rx - BORDER), ry, Math.min(BORDER, rx), rh),
-      stripMedian(rx + rw, ry, Math.min(BORDER, W - rx - rw), rh),
-    ].filter(Boolean);
-
-    let bgR = 255, bgG = 255, bgB = 255;
-    if (strips.length > 0) {
-      bgR = (strips.reduce((s, c) => s + c.r, 0) / strips.length) | 0;
-      bgG = (strips.reduce((s, c) => s + c.g, 0) / strips.length) | 0;
-      bgB = (strips.reduce((s, c) => s + c.b, 0) / strips.length) | 0;
-    }
-
-    // Single fillRect — covers all text pixels unconditionally.
-    ctx.fillStyle = `rgb(${bgR},${bgG},${bgB})`;
     ctx.fillRect(rx, ry, rw, rh);
   }
 
-  return canvas.toDataURL('image/jpeg', 0.92);
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), bgHex: bg.hex };
 }
 
 // ─── Estrazione testi DIRETTAMENTE dal PDF (no AI, no OCR) ────────────────────
@@ -312,8 +313,8 @@ async function extractTextViaAI(imageDataUrl, email, tier) {
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-function makeSlide(origDataUrl, cleanedDataUrl, textBlocks) {
-  return { origDataUrl, cleanedDataUrl, textBlocks, edited: {} };
+function makeSlide(origDataUrl, cleanedDataUrl, textBlocks, bgHex = '#ffffff') {
+  return { origDataUrl, cleanedDataUrl, textBlocks, bgHex, edited: {} };
 }
 
 // ─── Editor ───────────────────────────────────────────────────────────────────
@@ -378,8 +379,8 @@ export default function Editor({ onReset }) {
         setProgress({ done: 0, total: numPages, label: 'Pulisco i testi originali dalle immagini...' });
         const result = [];
         for (let i = 0; i < pages.length; i++) {
-          const cleaned = await fillTextAreas(pages[i].dataUrl, pages[i].directBlocks);
-          result.push(makeSlide(pages[i].dataUrl, cleaned, pages[i].directBlocks));
+          const { dataUrl: cleaned, bgHex } = await fillTextAreas(pages[i].dataUrl, pages[i].directBlocks);
+          result.push(makeSlide(pages[i].dataUrl, cleaned, pages[i].directBlocks, bgHex));
           setProgress({ done: i + 1, total: numPages, label: `Pulizia ${i + 1} / ${numPages}` });
         }
         setSlides(result);
@@ -394,8 +395,8 @@ export default function Editor({ onReset }) {
         setProgress({ done: i, total: numPages, label: `AI estrae testi: pagina ${i + 1} / ${numPages}` });
         try {
           const blocks = await extractTextViaAI(pages[i].dataUrl, user?.email, tier);
-          const cleaned = await fillTextAreas(pages[i].dataUrl, blocks);
-          result.push(makeSlide(pages[i].dataUrl, cleaned, blocks));
+          const { dataUrl: cleaned, bgHex } = await fillTextAreas(pages[i].dataUrl, blocks);
+          result.push(makeSlide(pages[i].dataUrl, cleaned, blocks, bgHex));
         } catch (err) {
           console.error('AI extraction failed for page', i + 1, err);
           result.push(makeSlide(pages[i].dataUrl, pages[i].dataUrl, []));
@@ -440,6 +441,15 @@ export default function Editor({ onReset }) {
       const SLIDE_W = 13.33;
       const SLIDE_H = 7.5;
 
+      // Helper: hex luma to pick a contrasting text colour for a slide.
+      const lumaOf = (hex) => {
+        const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+        if (!m) return 200;
+        const v = parseInt(m[1], 16);
+        const r = (v >> 16) & 0xff, g = (v >> 8) & 0xff, b = v & 0xff;
+        return r * 0.299 + g * 0.587 + b * 0.114;
+      };
+
       for (const slide of slides) {
         const pSlide = pptx.addSlide();
         // Sfondo: immagine "pulita" (testi originali rimossi, grafica intatta)
@@ -447,6 +457,10 @@ export default function Editor({ onReset }) {
           data: slide.cleanedDataUrl || slide.origDataUrl,
           x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
         });
+
+        const slideBgLuma = lumaOf(slide.bgHex);
+        // Default text colour: contrasting with the slide background.
+        const defaultTextColor = slideBgLuma < 128 ? 'F0F0F0' : '111111';
 
         for (let i = 0; i < slide.textBlocks.length; i++) {
           const tb = slide.textBlocks[i];
@@ -460,19 +474,24 @@ export default function Editor({ onReset }) {
           if (tx + tw > SLIDE_W) tw = SLIDE_W - tx;
           if (ty + th > SLIDE_H) th = SLIDE_H - ty;
 
-          // pdf.js fontSize e' in unita' PDF (1pt = 1unit), va bene cosi'.
-          // Convertiamo l'altezza da viewport pixel a punti (1in = 72pt;
-          // ipotizziamo viewport scale 1 = 1pt per unit).
           const fontPt = Math.max(8, Math.min(48, Math.round(tb.fontSize)));
+
+          // Use AI-extracted style if available, otherwise fall back to slide-luma defaults.
+          const tbColor = typeof tb.color === 'string' && /^#[0-9a-f]{6}$/i.test(tb.color)
+            ? tb.color.replace('#', '')
+            : defaultTextColor;
+          const tbFont = (typeof tb.fontFamily === 'string' && tb.fontFamily.trim())
+            ? tb.fontFamily.trim()
+            : 'Arial';
 
           pSlide.addText(text, {
             x: tx, y: ty, w: tw, h: th,
             fontSize: fontPt,
-            color: '222222',
+            color: tbColor,
             bold: tb.bold === true,
             italic: tb.italic === true,
             align: tb.align || 'left',
-            fontFace: 'Arial',
+            fontFace: tbFont,
             wrap: true, valign: 'top', margin: 0,
           });
         }
