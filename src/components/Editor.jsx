@@ -141,9 +141,6 @@ function loadPptxGen() {
 }
 
 // ─── Smart text removal: cancella i pixel di testo, mantieni grafica ─────────
-// Per ogni text-block, identifica i pixel "diversi dallo sfondo" (= il testo)
-// e li sostituisce col colore di sfondo dominante della zona, mantenendo
-// pattern, icone, gradienti tutto intorno.
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
@@ -155,8 +152,6 @@ function loadImage(src) {
   });
 }
 
-// Sample the dominant slide background colour from the 4 corner patches.
-// Returns { r, g, b } and the resulting hex string for downstream use.
 function sampleSlideBgFromCanvas(ctx, W, H) {
   const S = Math.min(40, Math.floor(Math.min(W, H) * 0.04));
   const patches = [
@@ -178,10 +173,6 @@ function sampleSlideBgFromCanvas(ctx, W, H) {
   return { r, g, b, hex: `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}` };
 }
 
-// Covers each text block with a solid fill of the slide's global background colour.
-// Using one consistent colour (sampled from the 4 corners) gives uniform patches
-// instead of per-block patches with slight colour drifts.
-// Returns { dataUrl, bgHex } so the caller can reuse the bg colour downstream.
 async function fillTextAreas(origDataUrl, textBlocks) {
   if (!textBlocks || textBlocks.length === 0) return { dataUrl: origDataUrl, bgHex: '#ffffff' };
 
@@ -196,7 +187,6 @@ async function fillTextAreas(origDataUrl, textBlocks) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
 
-  // ONE global background colour for the whole slide → uniform patches.
   const bg = sampleSlideBgFromCanvas(ctx, W, H);
   ctx.fillStyle = `rgb(${bg.r},${bg.g},${bg.b})`;
 
@@ -208,7 +198,6 @@ async function fillTextAreas(origDataUrl, textBlocks) {
     const w0 = Math.ceil(Math.max(4, (tb.w || 0) * W));
     const h0 = Math.ceil(Math.max(4, (tb.h || 0) * H));
 
-    // Estimate wrapped lines so the fill covers multi-line paragraphs.
     const charsPerLine = Math.max(1, Math.floor(w0 / Math.max(1, h0 * 0.55)));
     const numLines = Math.max(1, Math.ceil((tb.text || '').trim().length / charsPerLine));
     const h0eff = Math.ceil(h0 * numLines * 1.25);
@@ -228,9 +217,6 @@ async function fillTextAreas(origDataUrl, textBlocks) {
 }
 
 // ─── Estrazione testi DIRETTAMENTE dal PDF (no AI, no OCR) ────────────────────
-// I PDF di NotebookLM (e quasi tutti i PDF moderni generati da software) hanno
-// il testo come oggetti vettoriali, non come pixel. pdf.js ce li restituisce
-// con coordinate precise, font, dimensione. Niente AI, niente errori.
 
 async function extractTextFromPage(page) {
   const viewport = page.getViewport({ scale: 1 });
@@ -242,13 +228,9 @@ async function extractTextFromPage(page) {
   for (const item of textContent.items || []) {
     const str = (item.str || '').trim();
     if (!str) continue;
-    // item.transform = [a, b, c, d, e, f]
-    // (a,b,c,d) = scale/rotation, (e,f) = position in PDF coords (origin: bottom-left).
     const [, , c, d, e, f] = item.transform;
     const fontHeight = Math.hypot(c, d) || item.height || 12;
-    // item.width is 0 in some PDFs; fall back to a character-count estimate.
     const widthPx = item.width > 0 ? item.width : str.length * fontHeight * 0.55;
-    // Top-left in viewport coords (origin: top-left).
     const top = H - f;
     const left = e;
 
@@ -265,8 +247,6 @@ async function extractTextFromPage(page) {
     });
   }
 
-  // Raggruppa items adiacenti sulla stessa riga (stesso y, x consecutivi).
-  // Cosi' invece di un text-block per ogni glifo/parola, abbiamo uno per riga.
   blocks.sort((a, b) => a.y - b.y || a.x - b.x);
   const merged = [];
   for (const b of blocks) {
@@ -275,7 +255,6 @@ async function extractTextFromPage(page) {
       && Math.abs(last.y - b.y) < (last.h * 0.5)
       && Math.abs(last.fontSize - b.fontSize) < 2
       && (b.x - (last.x + last.w)) < (last.h * 3)) {
-      // estendi il blocco precedente
       last.text = last.text + (b.x - (last.x + last.w) > last.h * 0.2 ? ' ' : '') + b.text;
       last.w = (b.x + b.w) - last.x;
     } else {
@@ -325,7 +304,7 @@ export default function Editor({ onReset }) {
   const tierConfig = TIERS[tier] || null;
   const maxPages = getMaxPages(tier);
 
-  const [phase, setPhase] = useState('upload'); // 'upload'|'processing'|'editing'|'exporting'|'done'
+  const [phase, setPhase] = useState('upload');
   const [progress, setProgress] = useState({ done: 0, total: 0, label: '' });
   const [slides, setSlides] = useState([]);
   const [fileName, setFileName] = useState('');
@@ -335,7 +314,6 @@ export default function Editor({ onReset }) {
   const fileInputRef = useRef(null);
   const pdfFileRef = useRef(null);
 
-  // Detect once whether the LibreOffice service is configured on the server.
   useEffect(() => {
     fetch('/api/pdf-to-pptx').then(r => r.json()).then(d => setLibreofficeReady(!!d.configured)).catch(() => {});
   }, []);
@@ -362,7 +340,6 @@ export default function Editor({ onReset }) {
       const numPages = Math.min(pdf.numPages, maxPages);
       setProgress({ done: 0, total: numPages, label: `Caricamento ${numPages} pagine...` });
 
-      // Step 1: render tutte le pagine come immagini + tenta estrazione diretta.
       const pages = [];
       for (let i = 1; i <= numPages; i++) {
         const page = await pdf.getPage(i);
@@ -373,7 +350,6 @@ export default function Editor({ onReset }) {
         await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
         const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
-        // Tentativo 1: testo vettoriale dal PDF (PDF testuali — istantaneo)
         const directBlocks = await extractTextFromPage(page);
 
         pages.push({ dataUrl, directBlocks });
@@ -382,7 +358,6 @@ export default function Editor({ onReset }) {
 
       const totalDirectTexts = pages.reduce((acc, p) => acc + p.directBlocks.length, 0);
 
-      // Step 2: se il PDF ha testo vettoriale → usa quello (immediato, perfetto).
       if (totalDirectTexts > 0) {
         setProgress({ done: 0, total: numPages, label: 'Pulisco i testi originali dalle immagini...' });
         const result = [];
@@ -396,19 +371,26 @@ export default function Editor({ onReset }) {
         return;
       }
 
-      // Step 3: PDF raster (es. NotebookLM) → fallback OpenRouter Vision per ogni pagina.
+      // Step 3: PDF raster (es. NotebookLM) → fallback OpenRouter Vision, 3 slide in parallelo.
       setProgress({ done: 0, total: numPages, label: 'PDF tipo immagine: uso AI Vision...' });
-      const result = [];
-      for (let i = 0; i < pages.length; i++) {
-        setProgress({ done: i, total: numPages, label: `AI estrae testi: pagina ${i + 1} / ${numPages}` });
-        try {
-          const blocks = await extractTextViaAI(pages[i].dataUrl, user?.email, tier);
-          const { dataUrl: cleaned, bgHex } = await fillTextAreas(pages[i].dataUrl, blocks);
-          result.push(makeSlide(pages[i].dataUrl, cleaned, blocks, bgHex));
-        } catch (err) {
-          console.error('AI extraction failed for page', i + 1, err);
-          result.push(makeSlide(pages[i].dataUrl, pages[i].dataUrl, []));
-        }
+      const result = new Array(pages.length);
+      let done = 0;
+      const CONCURRENCY = 3;
+      for (let start = 0; start < pages.length; start += CONCURRENCY) {
+        const batch = pages.slice(start, start + CONCURRENCY);
+        await Promise.all(batch.map(async (p, j) => {
+          const i = start + j;
+          try {
+            const blocks = await extractTextViaAI(p.dataUrl, user?.email, tier);
+            const { dataUrl: cleaned, bgHex } = await fillTextAreas(p.dataUrl, blocks);
+            result[i] = makeSlide(p.dataUrl, cleaned, blocks, bgHex);
+          } catch (err) {
+            console.error('AI extraction failed for page', i + 1, err);
+            result[i] = makeSlide(p.dataUrl, p.dataUrl, []);
+          }
+          done++;
+          setProgress({ done, total: numPages, label: `AI estrae testi: pagina ${done} / ${numPages}` });
+        }));
       }
       setProgress({ done: numPages, total: numPages, label: 'Pronto' });
       setSlides(result);
@@ -439,9 +421,6 @@ export default function Editor({ onReset }) {
     ));
   }, []);
 
-  // High-quality vector conversion via the external LibreOffice service.
-  // Sends the ORIGINAL PDF (not the rasterised slides) so every shape, text run
-  // and image becomes a native PowerPoint object.
   const exportVectorPptx = useCallback(async () => {
     if (!pdfFileRef.current) {
       setGlobalError('PDF originale non disponibile. Ricarica il file.');
@@ -486,7 +465,6 @@ export default function Editor({ onReset }) {
       const SLIDE_W = 13.33;
       const SLIDE_H = 7.5;
 
-      // Helper: hex luma to pick a contrasting text colour for a slide.
       const lumaOf = (hex) => {
         const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
         if (!m) return 200;
@@ -497,14 +475,12 @@ export default function Editor({ onReset }) {
 
       for (const slide of slides) {
         const pSlide = pptx.addSlide();
-        // Sfondo: immagine "pulita" (testi originali rimossi, grafica intatta)
         pSlide.addImage({
           data: slide.cleanedDataUrl || slide.origDataUrl,
           x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
         });
 
         const slideBgLuma = lumaOf(slide.bgHex);
-        // Default text colour: contrasting with the slide background.
         const defaultTextColor = slideBgLuma < 128 ? 'F0F0F0' : '111111';
 
         for (let i = 0; i < slide.textBlocks.length; i++) {
@@ -521,7 +497,6 @@ export default function Editor({ onReset }) {
 
           const fontPt = Math.max(8, Math.min(48, Math.round(tb.fontSize)));
 
-          // Use AI-extracted style if available, otherwise fall back to slide-luma defaults.
           const tbColor = typeof tb.color === 'string' && /^#[0-9a-f]{6}$/i.test(tb.color)
             ? tb.color.replace('#', '')
             : defaultTextColor;
@@ -695,7 +670,6 @@ function UploadZone({ isDragOver, onDragOver, onDragLeave, onDrop, onClick, maxP
   );
 }
 
-// Detect dominant luma from 4 corners of an image data URL (async, best-effort).
 function detectSlideBgLuma(dataUrl) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -706,7 +680,6 @@ function detectSlideBgLuma(dataUrl) {
         canvas.width = S * 2; canvas.height = S * 2;
         const ctx = canvas.getContext('2d');
         const iw = img.naturalWidth; const ih = img.naturalHeight;
-        // draw 4 corners compressed into a 2×2 grid of S×S patches
         ctx.drawImage(img, 0,      0,      S, S, 0, 0, S, S);
         ctx.drawImage(img, iw - S, 0,      S, S, S, 0, S, S);
         ctx.drawImage(img, 0,      ih - S, S, S, 0, S, S, S);
@@ -716,7 +689,7 @@ function detectSlideBgLuma(dataUrl) {
         for (let p = 0; p < d.length; p += 4)
           luma += d[p] * 0.299 + d[p + 1] * 0.587 + d[p + 2] * 0.114;
         resolve(luma / (d.length / 4));
-      } catch { resolve(200); } // fallback: assume light
+      } catch { resolve(200); }
     };
     img.onerror = () => resolve(200);
     img.src = dataUrl;
@@ -737,7 +710,6 @@ function SlideCard({ slide, index, onUpdateText }) {
     return () => ro.disconnect();
   }, []);
 
-  // Detect if slide has a dark background to choose contrasting text colour.
   useEffect(() => {
     const src = slide.cleanedDataUrl || slide.origDataUrl;
     if (!src) return;
@@ -745,11 +717,9 @@ function SlideCard({ slide, index, onUpdateText }) {
   }, [slide.cleanedDataUrl, slide.origDataUrl]);
 
   const H = W * 9 / 16;
-  // 1pt = 1/72in; SLIDE_H = 7.5in = 540pt. Quindi 1pt = H/540 px.
   const ptToPx = H / 540;
   const textColor = darkBg ? '#f0f0f0' : '#111111';
 
-  // Estimate visual line count for a text block (mirrors fillTextAreas logic).
   function estimateLines(tb) {
     const blockWpx = Math.max(1, (tb.w || 0.1) * W);
     const fontPx = Math.max(8, (tb.fontSize || 14) * ptToPx);
@@ -781,8 +751,6 @@ function SlideCard({ slide, index, onUpdateText }) {
         {slide.textBlocks.map((tb, bi) => {
           const lines = estimateLines(tb);
           const fontPx = Math.max(11, (tb.fontSize || 14) * ptToPx);
-          // Height covers all estimated wrapped lines with 1.25 line-height,
-          // matching the erasure area calculated in fillTextAreas.
           const blockHeightPct = Math.max(1.5, (tb.h || 0) * 100 * lines * 1.25);
           return (
             <div key={bi} contentEditable suppressContentEditableWarning
