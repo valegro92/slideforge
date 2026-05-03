@@ -22,6 +22,11 @@ import { callOpenRouter, validateResponse } from '@/lib/openrouter';
 import { canUseModel, getMaxPages, resolveTier } from '@/lib/tiers';
 import { checkAllowedEmail } from '@/lib/allowedEmails';
 
+// Maximum execution time for this serverless function. Vision calls on free
+// OpenRouter models can take 20-40s; we need headroom for retries+fallbacks.
+export const maxDuration = 60;
+export const runtime = 'nodejs';
+
 // Simple in-memory rate limiting (use Redis in production)
 const requestCounts = new Map();
 
@@ -33,9 +38,10 @@ const RATE_LIMITS = {
   enterprise: 1000,
 };
 
+// Primary model — others are tried automatically as fallback inside openrouter.js.
 const DEFAULT_MODELS = {
-  pro: 'nvidia/nemotron-nano-12b-v2-vl:free',
-  enterprise: 'nvidia/nemotron-nano-12b-v2-vl:free',
+  pro: 'mistralai/mistral-small-3.2-24b-instruct:free',
+  enterprise: 'mistralai/mistral-small-3.2-24b-instruct:free',
 };
 
 function getModelForTier(tier) {

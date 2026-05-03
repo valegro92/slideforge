@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TIERS, getMaxPages, resolveTier } from '../lib/tiers';
 import { useTier } from '../lib/TierContext';
+import { parsePptxBlob } from '../lib/pptxParser';
 
 // ─── Stili ────────────────────────────────────────────────────────────────────
 
@@ -313,6 +314,7 @@ export default function Editor({ onReset }) {
   const [libreofficeReady, setLibreofficeReady] = useState(false);
   const fileInputRef = useRef(null);
   const pdfFileRef = useRef(null);
+  const pptxBlobRef = useRef(null); // Cached PPTX from LibreOffice for fast re-export.
 
   useEffect(() => {
     fetch('/api/pdf-to-pptx').then(r => r.json()).then(d => setLibreofficeReady(!!d.configured)).catch(() => {});
@@ -325,6 +327,34 @@ export default function Editor({ onReset }) {
       el.id = id; el.textContent = STYLES;
       document.head.appendChild(el);
     }
+  }, []);
+
+  // Convert PDF→PPTX via LibreOffice and parse text positions in browser.
+  // Returns an array (one entry per slide) of text-block arrays in the
+  // editor's normalised shape. Caches the PPTX blob for fast re-export.
+  const extractViaLibreOffice = useCallback(async (file, email) => {
+    // Get direct upload credentials (bypasses Vercel's 4.5MB limit).
+    const tokenResp = await fetch('/api/lo-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email || '' }),
+    });
+    if (!tokenResp.ok) throw new Error(`token ${tokenResp.status}`);
+    const { endpoint, token } = await tokenResp.json();
+
+    const fd = new FormData();
+    fd.append('file', file, file.name || 'input.pdf');
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: fd,
+    });
+    if (!resp.ok) throw new Error(`LO ${resp.status}`);
+    const blob = await resp.blob();
+    pptxBlobRef.current = blob;
+
+    const { slides: parsedSlides } = await parsePptxBlob(blob);
+    return parsedSlides.map(s => s.blocks);
   }, []);
 
   const processFile = useCallback(async (file) => {
@@ -371,27 +401,49 @@ export default function Editor({ onReset }) {
         return;
       }
 
-      // Step 3: PDF raster (es. NotebookLM) → fallback OpenRouter Vision, 3 slide in parallelo.
-      setProgress({ done: 0, total: numPages, label: 'PDF tipo immagine: uso AI Vision...' });
-      const result = new Array(pages.length);
-      let done = 0;
-      const CONCURRENCY = 2;
-      for (let start = 0; start < pages.length; start += CONCURRENCY) {
-        const batch = pages.slice(start, start + CONCURRENCY);
-        await Promise.all(batch.map(async (p, j) => {
-          const i = start + j;
+      // Step 3: raster PDF (NotebookLM ecc.). Strategia robusta:
+      //   3a) Provo LibreOffice: una sola chiamata server-side, riceve un PPTX
+      //       reale, da cui estraggo TUTTI i text-block con coordinate precise.
+      //       Niente AI = nessun 504, nessun rate-limit, qualità deterministica.
+      //   3b) Solo se LO non è disponibile o fallisce, ricado sull'AI Vision.
+      let result = null;
+      if (libreofficeReady) {
+        try {
+          setProgress({ done: 0, total: numPages, label: 'Conversione vettoriale (LibreOffice)...' });
+          const blocksPerSlide = await extractViaLibreOffice(file, user?.email);
+          if (blocksPerSlide && blocksPerSlide.length > 0) {
+            setProgress({ done: 0, total: numPages, label: 'Pulisco i testi originali dalle immagini...' });
+            result = new Array(pages.length);
+            for (let i = 0; i < pages.length; i++) {
+              const blocks = blocksPerSlide[i] || [];
+              const { dataUrl: cleaned, bgHex } = await fillTextAreas(pages[i].dataUrl, blocks);
+              result[i] = makeSlide(pages[i].dataUrl, cleaned, blocks, bgHex);
+              setProgress({ done: i + 1, total: numPages, label: `Pulizia ${i + 1} / ${numPages}` });
+            }
+          }
+        } catch (e) {
+          console.warn('LibreOffice extraction failed, falling back to AI:', e);
+        }
+      }
+
+      if (!result) {
+        // Fallback: AI per pagina (sequenziale per evitare rate-limit / 504).
+        setProgress({ done: 0, total: numPages, label: 'PDF tipo immagine: uso AI Vision...' });
+        result = new Array(pages.length);
+        for (let i = 0; i < pages.length; i++) {
+          setProgress({ done: i, total: numPages, label: `AI estrae testi: pagina ${i + 1} / ${numPages}` });
           try {
-            const blocks = await extractTextViaAI(p.dataUrl, user?.email, tier);
-            const { dataUrl: cleaned, bgHex } = await fillTextAreas(p.dataUrl, blocks);
-            result[i] = makeSlide(p.dataUrl, cleaned, blocks, bgHex);
+            const blocks = await extractTextViaAI(pages[i].dataUrl, user?.email, tier);
+            const { dataUrl: cleaned, bgHex } = await fillTextAreas(pages[i].dataUrl, blocks);
+            result[i] = makeSlide(pages[i].dataUrl, cleaned, blocks, bgHex);
           } catch (err) {
             console.error('AI extraction failed for page', i + 1, err);
-            result[i] = makeSlide(p.dataUrl, p.dataUrl, []);
+            // Mostra comunque la slide come immagine, senza overlay editabile.
+            result[i] = makeSlide(pages[i].dataUrl, pages[i].dataUrl, []);
           }
-          done++;
-          setProgress({ done, total: numPages, label: `AI estrae testi: pagina ${done} / ${numPages}` });
-        }));
+        }
       }
+
       setProgress({ done: numPages, total: numPages, label: 'Pronto' });
       setSlides(result);
       setPhase('editing');
@@ -400,7 +452,7 @@ export default function Editor({ onReset }) {
       setGlobalError(`Errore: ${err.message}`);
       setPhase('upload');
     }
-  }, [maxPages, user, tier]);
+  }, [maxPages, user, tier, libreofficeReady, extractViaLibreOffice]);
 
   const handleFileSelect = useCallback((file) => {
     if (!file || file.type !== 'application/pdf') return;
@@ -422,35 +474,37 @@ export default function Editor({ onReset }) {
   }, []);
 
   const exportVectorPptx = useCallback(async () => {
-    if (!pdfFileRef.current) {
+    if (!pdfFileRef.current && !pptxBlobRef.current) {
       setGlobalError('PDF originale non disponibile. Ricarica il file.');
       return;
     }
     setPhase('exporting');
     setGlobalError(null);
     try {
-      // Get a direct upload token to bypass Vercel's 4.5MB body limit.
-      const tokenResp = await fetch('/api/lo-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: user?.email || '' }),
-      });
-      if (!tokenResp.ok) throw new Error(`token ${tokenResp.status}`);
-      const { endpoint, token } = await tokenResp.json();
-
-      // Upload directly from the browser to the LibreOffice service.
-      const fd = new FormData();
-      fd.append('file', pdfFileRef.current, pdfFileRef.current.name || 'input.pdf');
-      const resp = await fetch(endpoint, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: fd,
-      });
-      if (!resp.ok) {
-        const errBody = await resp.json().catch(() => ({}));
-        throw new Error(errBody.error || `HTTP ${resp.status}`);
+      // Reuse the PPTX blob if already converted during slide loading.
+      let blob = pptxBlobRef.current;
+      if (!blob) {
+        const tokenResp = await fetch('/api/lo-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: user?.email || '' }),
+        });
+        if (!tokenResp.ok) throw new Error(`token ${tokenResp.status}`);
+        const { endpoint, token } = await tokenResp.json();
+        const fd = new FormData();
+        fd.append('file', pdfFileRef.current, pdfFileRef.current.name || 'input.pdf');
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: fd,
+        });
+        if (!resp.ok) {
+          const errBody = await resp.json().catch(() => ({}));
+          throw new Error(errBody.error || `HTTP ${resp.status}`);
+        }
+        blob = await resp.blob();
+        pptxBlobRef.current = blob;
       }
-      const blob = await resp.blob();
       const dlUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = dlUrl;

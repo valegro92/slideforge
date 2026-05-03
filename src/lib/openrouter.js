@@ -39,63 +39,89 @@ REGOLE:
 3. fontSize: titoli ~28-40pt, corpo ~14-20pt, didascalie ~10-12pt.
 4. Restituisci SOLO il JSON. Niente markdown fences, niente spiegazioni.`;
 
-const MAX_RETRIES = 3;
-const INITIAL_DELAY = 1000;
-const MAX_DELAY = 20000;
+const PER_REQUEST_TIMEOUT_MS = 25000;
+
+// Fallback chain of free vision models, tried in order. If the first one is
+// slow/rate-limited, the second/third gets a chance. All free.
+const FALLBACK_MODELS = [
+  'mistralai/mistral-small-3.2-24b-instruct:free',
+  'google/gemma-3-27b-it:free',
+  'nvidia/nemotron-nano-12b-v2-vl:free',
+];
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callSingleModel(apiKey, model, dataUrl) {
+  const response = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://slideforge.app',
+      'X-Title': 'SlideForge',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: SLIDE_PROMPT },
+          { type: 'image_url', image_url: { url: dataUrl } },
+        ],
+      }],
+      temperature: 0.05,
+      max_tokens: 4000,
+    }),
+  }, PER_REQUEST_TIMEOUT_MS);
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    const err = new Error(`OpenRouter ${response.status}: ${errorText.substring(0, 200)}`);
+    err.status = response.status;
+    throw err;
+  }
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error('Empty AI response');
+  return parseJsonResponse(content);
+}
 
 export async function callOpenRouter(apiKey, model, dataUrl) {
   if (!apiKey) throw new Error('OpenRouter API key not provided');
-  if (!model) throw new Error('Model not specified');
   if (!dataUrl) throw new Error('Image data URL not provided');
 
+  // Build fallback chain: requested model first, then defaults (deduped).
+  const chain = [];
+  if (model) chain.push(model);
+  for (const m of FALLBACK_MODELS) if (!chain.includes(m)) chain.push(m);
+
   let lastError = null;
-
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    if (attempt > 0) {
-      const delay = Math.min(INITIAL_DELAY * Math.pow(2, attempt - 1), MAX_DELAY);
-      await new Promise(r => setTimeout(r, delay));
-    }
+  for (let i = 0; i < chain.length; i++) {
+    const m = chain[i];
     try {
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://slideforge.app',
-          'X-Title': 'SlideForge',
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'text', text: SLIDE_PROMPT },
-              { type: 'image_url', image_url: { url: dataUrl } },
-            ],
-          }],
-          temperature: 0.05,
-          max_tokens: 8000,
-        }),
-      });
-
-      if (response.status === 429 || response.status === 503) {
-        lastError = new Error(`Rate limited (${response.status})`);
-        continue;
+      const result = await callSingleModel(apiKey, m, dataUrl);
+      // Need at least some text blocks; otherwise try the next model.
+      if (Array.isArray(result.textBlocks) && result.textBlocks.length > 0) {
+        return result;
       }
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`OpenRouter ${response.status}: ${errorText.substring(0, 300)}`);
-      }
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) throw new Error('Empty AI response');
-      return parseJsonResponse(content);
-    } catch (error) {
-      lastError = error;
-      if (attempt === MAX_RETRIES - 1) throw error;
+      lastError = new Error(`Model ${m} returned no text blocks`);
+    } catch (e) {
+      lastError = e;
+      // Retryable? 429/5xx → try next model. AbortError too.
+      const status = e.status || 0;
+      const retryable = status === 429 || status >= 500 || e.name === 'AbortError';
+      if (!retryable) throw e;
     }
   }
-  throw lastError || new Error('OpenRouter call failed');
+  throw lastError || new Error('All OpenRouter models failed');
 }
 
 function parseJsonResponse(text) {
