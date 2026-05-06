@@ -105,21 +105,10 @@ const IconDownload = () => (
 let pdfJsPromise = null;
 function loadPdfJs() {
   if (pdfJsPromise) return pdfJsPromise;
-  pdfJsPromise = new Promise((resolve, reject) => {
-    if (window.pdfjsLib) { resolve(window.pdfjsLib); return; }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs';
-    script.type = 'module';
-    script.onload = () => {
-      const lib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
-      if (lib) {
-        lib.GlobalWorkerOptions.workerSrc =
-          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
-        resolve(lib);
-      } else reject(new Error('PDF.js failed to load'));
-    };
-    script.onerror = () => reject(new Error('Could not load PDF.js'));
-    document.head.appendChild(script);
+  pdfJsPromise = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs').then(lib => {
+    lib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
+    return lib;
   });
   return pdfJsPromise;
 }
@@ -315,6 +304,16 @@ export default function Editor({ onReset }) {
   const fileInputRef = useRef(null);
   const pdfFileRef = useRef(null);
   const pptxBlobRef = useRef(null); // Cached PPTX from LibreOffice for fast re-export.
+
+  const handleReset = useCallback(() => {
+    setPhase('upload');
+    setSlides([]);
+    setFileName('');
+    setGlobalError(null);
+    pdfFileRef.current = null;
+    pptxBlobRef.current = null;
+    onReset?.();
+  }, [onReset]);
 
   useEffect(() => {
     fetch('/api/pdf-to-pptx').then(r => r.json()).then(d => setLibreofficeReady(!!d.configured)).catch(() => {});
@@ -609,7 +608,7 @@ export default function Editor({ onReset }) {
             <div style={{ fontSize: 40 }}>🔒</div>
             <div className="upload-title">Accedi con la tua email</div>
             <div className="upload-sub">Riservato agli iscritti de La Cassetta degli AI-trezzi</div>
-            <button className="btn btn-primary" onClick={onReset}>Accedi</button>
+            <button className="btn btn-primary" onClick={handleReset}>Accedi</button>
           </div>
         </div>
       </div>
@@ -629,7 +628,7 @@ export default function Editor({ onReset }) {
           <span className="tier-badge">{tierConfig.name}</span>
           {phase === 'editing' && (
             <>
-              <button className="btn btn-ghost btn-sm" onClick={onReset}>Nuovo PDF</button>
+              <button className="btn btn-ghost btn-sm" onClick={handleReset}>Nuovo PDF</button>
               {libreofficeReady && (
                 <button
                   className="btn btn-ghost btn-sm"
@@ -708,7 +707,7 @@ export default function Editor({ onReset }) {
           <p>Il file PPTX e&apos; stato scaricato.</p>
           <div style={{ display: 'flex', gap: 12 }}>
             <button className="btn btn-ghost" onClick={() => setPhase('editing')}>Torna alle slide</button>
-            <button className="btn btn-primary" onClick={onReset}>Nuovo PDF</button>
+            <button className="btn btn-primary" onClick={handleReset}>Nuovo PDF</button>
           </div>
         </div>
       )}
