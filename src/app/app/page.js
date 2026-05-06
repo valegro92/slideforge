@@ -1,5 +1,4 @@
 import Editor from '@/components/Editor';
-import EditorLayout from '@/components/EditorLayout';
 
 export const metadata = {
   title: 'Editor - SlideForge',
@@ -7,9 +6,5 @@ export const metadata = {
 };
 
 export default function EditorPage() {
-  return (
-    <EditorLayout>
-      <Editor />
-    </EditorLayout>
-  );
+  return <Editor />;
 }

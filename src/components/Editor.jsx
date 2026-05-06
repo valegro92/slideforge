@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TIERS, getMaxPages, resolveTier } from '../lib/tiers';
 import { useTier } from '../lib/TierContext';
 import { parsePptxBlob } from '../lib/pptxParser';
+import LoginModal from './LoginModal';
 
 // ─── Stili ────────────────────────────────────────────────────────────────────
 
@@ -289,7 +290,7 @@ function makeSlide(origDataUrl, cleanedDataUrl, textBlocks, bgHex = '#ffffff') {
 // ─── Editor ───────────────────────────────────────────────────────────────────
 
 export default function Editor({ onReset }) {
-  const { tier: rawTier, isLoggedIn, user } = useTier();
+  const { tier: rawTier, isLoggedIn, user, login, logout } = useTier();
   const tier = resolveTier(rawTier || '');
   const tierConfig = TIERS[tier] || null;
   const maxPages = getMaxPages(tier);
@@ -301,6 +302,7 @@ export default function Editor({ onReset }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [globalError, setGlobalError] = useState(null);
   const [libreofficeReady, setLibreofficeReady] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const fileInputRef = useRef(null);
   const pdfFileRef = useRef(null);
   const pptxBlobRef = useRef(null); // Cached PPTX from LibreOffice for fast re-export.
@@ -608,9 +610,15 @@ export default function Editor({ onReset }) {
             <div style={{ fontSize: 40 }}>🔒</div>
             <div className="upload-title">Accedi con la tua email</div>
             <div className="upload-sub">Riservato agli iscritti de La Cassetta degli AI-trezzi</div>
-            <button className="btn btn-primary" onClick={handleReset}>Accedi</button>
+            <button className="btn btn-primary" onClick={() => setShowLoginModal(true)}>Accedi</button>
           </div>
         </div>
+        <LoginModal
+          isOpen={showLoginModal}
+          required={false}
+          onClose={() => setShowLoginModal(false)}
+          onLogin={(userData) => { login(userData); setShowLoginModal(false); }}
+        />
       </div>
     );
   }
@@ -626,6 +634,9 @@ export default function Editor({ onReset }) {
         )}
         <div className="ed-header-right">
           <span className="tier-badge">{tierConfig.name}</span>
+          {user?.email && (
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{user.email}</span>
+          )}
           {phase === 'editing' && (
             <>
               <button className="btn btn-ghost btn-sm" onClick={handleReset}>Nuovo PDF</button>
@@ -642,6 +653,7 @@ export default function Editor({ onReset }) {
               </button>
             </>
           )}
+          <button className="btn btn-ghost btn-sm" onClick={logout}>Esci</button>
         </div>
       </header>
 
