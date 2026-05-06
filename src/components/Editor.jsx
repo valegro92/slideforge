@@ -106,7 +106,7 @@ const IconDownload = () => (
 let pdfJsPromise = null;
 function loadPdfJs() {
   if (pdfJsPromise) return pdfJsPromise;
-  pdfJsPromise = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs').then(lib => {
+  pdfJsPromise = import(/* webpackIgnore: true */ 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs').then(lib => {
     lib.GlobalWorkerOptions.workerSrc =
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
     return lib;
