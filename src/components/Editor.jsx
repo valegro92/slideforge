@@ -174,13 +174,64 @@ function sampleSlideBgFromCanvas(ctx, W, H) {
   return { r, g, b, hex: `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}` };
 }
 
+// Median RGB of a strip: robust to text pixels and small artifacts.
+function medianRgbOfStrip(ctx, x, y, w, h, W, H) {
+  x = Math.max(0, Math.floor(x));
+  y = Math.max(0, Math.floor(y));
+  w = Math.min(W - x, Math.ceil(w));
+  h = Math.min(H - y, Math.ceil(h));
+  if (w <= 0 || h <= 0) return null;
+  const d = ctx.getImageData(x, y, w, h).data;
+  const R = [], G = [], B = [];
+  for (let i = 0; i < d.length; i += 4) {
+    R.push(d[i]); G.push(d[i + 1]); B.push(d[i + 2]);
+  }
+  if (!R.length) return null;
+  R.sort((a, b) => a - b); G.sort((a, b) => a - b); B.sort((a, b) => a - b);
+  const m = R.length >> 1;
+  return { r: R[m], g: G[m], b: B[m], n: R.length };
+}
+
+// Background sampled from a thin ring just outside a text block. Falls back
+// to global corner sampling if the block touches the slide edges. This lets
+// the inpainting blend with locally-coloured backgrounds (header bands,
+// gradients, branded sections) instead of leaving a grey patch.
+function sampleBgAroundBlock(ctx, x, y, w, h, W, H, fallback) {
+  const margin = Math.max(3, Math.floor(Math.min(w, h) * 0.5));
+  const strips = [
+    medianRgbOfStrip(ctx, x, y - margin, w, margin, W, H),         // top
+    medianRgbOfStrip(ctx, x, y + h, w, margin, W, H),               // bottom
+    medianRgbOfStrip(ctx, x - margin, y, margin, h, W, H),          // left
+    medianRgbOfStrip(ctx, x + w, y, margin, h, W, H),               // right
+  ].filter(Boolean);
+  if (!strips.length) return fallback;
+  // Weighted median by strip pixel count: the dominant surrounding colour wins.
+  const all = [];
+  for (const s of strips) all.push([s.r, s.g, s.b, s.n]);
+  // Sort by perceived luma so we pick the median tone, not a colour outlier.
+  all.sort((a, b) =>
+    (a[0] * 0.299 + a[1] * 0.587 + a[2] * 0.114) -
+    (b[0] * 0.299 + b[1] * 0.587 + b[2] * 0.114));
+  const total = all.reduce((s, x) => s + x[3], 0);
+  let acc = 0;
+  for (const [r, g, b, n] of all) {
+    acc += n;
+    if (acc >= total / 2) {
+      return { r, g, b, hex: `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}` };
+    }
+  }
+  return fallback;
+}
+
+const lumaOfRgb = (r, g, b) => r * 0.299 + g * 0.587 + b * 0.114;
+
 async function fillTextAreas(origDataUrl, textBlocks) {
-  if (!textBlocks || textBlocks.length === 0) return { dataUrl: origDataUrl, bgHex: '#ffffff' };
+  if (!textBlocks || textBlocks.length === 0) return { dataUrl: origDataUrl, bgHex: '#ffffff', perBlock: [] };
 
   const img = await loadImage(origDataUrl);
   const W = img.naturalWidth;
   const H = img.naturalHeight;
-  if (!W || !H) return { dataUrl: origDataUrl, bgHex: '#ffffff' };
+  if (!W || !H) return { dataUrl: origDataUrl, bgHex: '#ffffff', perBlock: [] };
 
   const canvas = document.createElement('canvas');
   canvas.width = W;
@@ -188,11 +239,14 @@ async function fillTextAreas(origDataUrl, textBlocks) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
 
-  const bg = sampleSlideBgFromCanvas(ctx, W, H);
-  ctx.fillStyle = `rgb(${bg.r},${bg.g},${bg.b})`;
-
+  const slideBg = sampleSlideBgFromCanvas(ctx, W, H);
   const PAD = 0.15;
+  const perBlock = [];
 
+  // First pass: figure out each block's local bg colour from the *original*
+  // pixels (before any rectangle has been drawn). Doing this up-front avoids
+  // sampling from a strip that we just repainted.
+  const fills = [];
   for (const tb of textBlocks) {
     const x0 = Math.floor((tb.x || 0) * W);
     const y0 = Math.floor((tb.y || 0) * H);
@@ -209,12 +263,27 @@ async function fillTextAreas(origDataUrl, textBlocks) {
     const ry = Math.max(0, y0 - padY);
     const rw = Math.min(W - rx, w0 + padX * 2);
     const rh = Math.min(H - ry, h0eff + padY * 2);
-    if (rw < 2 || rh < 2) continue;
 
-    ctx.fillRect(rx, ry, rw, rh);
+    const localBg = sampleBgAroundBlock(ctx, rx, ry, rw, rh, W, H, slideBg);
+    fills.push({ rx, ry, rw, rh, bg: localBg });
+    const luma = lumaOfRgb(localBg.r, localBg.g, localBg.b);
+    perBlock.push({
+      bgHex: localBg.hex,
+      textColor: luma < 128 ? '#f5f5f5' : '#111111',
+    });
   }
 
-  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), bgHex: bg.hex };
+  for (const f of fills) {
+    if (f.rw < 2 || f.rh < 2) continue;
+    ctx.fillStyle = `rgb(${f.bg.r},${f.bg.g},${f.bg.b})`;
+    ctx.fillRect(f.rx, f.ry, f.rw, f.rh);
+  }
+
+  return {
+    dataUrl: canvas.toDataURL('image/jpeg', 0.92),
+    bgHex: slideBg.hex,
+    perBlock,
+  };
 }
 
 // ─── Estrazione testi DIRETTAMENTE dal PDF (no AI, no OCR) ────────────────────
@@ -293,8 +362,10 @@ async function extractTextViaAI(imageDataUrl, email, tier) {
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-function makeSlide(origDataUrl, cleanedDataUrl, textBlocks, bgHex = '#ffffff') {
-  return { origDataUrl, cleanedDataUrl, textBlocks, bgHex, edited: {} };
+function makeSlide(origDataUrl, cleanedDataUrl, textBlocks, bgHex = '#ffffff', perBlock = []) {
+  // perBlock parallels textBlocks: { bgHex, textColor } sampled from the
+  // original image around each block's position. Falls back to slide-level bg.
+  return { origDataUrl, cleanedDataUrl, textBlocks, bgHex, perBlock, edited: {} };
 }
 
 // ─── Editor ───────────────────────────────────────────────────────────────────
@@ -392,8 +463,8 @@ export default function Editor({ onReset }) {
         setProgress({ done: 0, total: numPages, label: 'Pulisco i testi originali dalle immagini...' });
         const result = [];
         for (let i = 0; i < pages.length; i++) {
-          const { dataUrl: cleaned, bgHex } = await fillTextAreas(pages[i].dataUrl, pages[i].directBlocks);
-          result.push(makeSlide(pages[i].dataUrl, cleaned, pages[i].directBlocks, bgHex));
+          const { dataUrl: cleaned, bgHex, perBlock } = await fillTextAreas(pages[i].dataUrl, pages[i].directBlocks);
+          result.push(makeSlide(pages[i].dataUrl, cleaned, pages[i].directBlocks, bgHex, perBlock));
           setProgress({ done: i + 1, total: numPages, label: `Pulizia ${i + 1} / ${numPages}` });
         }
         setSlides(result);
@@ -416,8 +487,8 @@ export default function Editor({ onReset }) {
             result = new Array(pages.length);
             for (let i = 0; i < pages.length; i++) {
               const blocks = blocksPerSlide[i] || [];
-              const { dataUrl: cleaned, bgHex } = await fillTextAreas(pages[i].dataUrl, blocks);
-              result[i] = makeSlide(pages[i].dataUrl, cleaned, blocks, bgHex);
+              const { dataUrl: cleaned, bgHex, perBlock } = await fillTextAreas(pages[i].dataUrl, blocks);
+              result[i] = makeSlide(pages[i].dataUrl, cleaned, blocks, bgHex, perBlock);
               setProgress({ done: i + 1, total: numPages, label: `Pulizia ${i + 1} / ${numPages}` });
             }
           }
@@ -434,8 +505,8 @@ export default function Editor({ onReset }) {
           setProgress({ done: i, total: numPages, label: `AI estrae testi: pagina ${i + 1} / ${numPages}` });
           try {
             const blocks = await extractTextViaAI(pages[i].dataUrl, user?.email, tier);
-            const { dataUrl: cleaned, bgHex } = await fillTextAreas(pages[i].dataUrl, blocks);
-            result[i] = makeSlide(pages[i].dataUrl, cleaned, blocks, bgHex);
+            const { dataUrl: cleaned, bgHex, perBlock } = await fillTextAreas(pages[i].dataUrl, blocks);
+            result[i] = makeSlide(pages[i].dataUrl, cleaned, blocks, bgHex, perBlock);
           } catch (err) {
             console.error('AI extraction failed for page', i + 1, err);
             // Mostra comunque la slide come immagine, senza overlay editabile.
@@ -564,9 +635,13 @@ export default function Editor({ onReset }) {
 
           const fontPt = Math.max(8, Math.min(48, Math.round(tb.fontSize)));
 
+          const meta = slide.perBlock && slide.perBlock[i];
+          const perBlockColor = meta && /^#[0-9a-f]{6}$/i.test(meta.textColor || '')
+            ? meta.textColor.replace('#', '')
+            : null;
           const tbColor = typeof tb.color === 'string' && /^#[0-9a-f]{6}$/i.test(tb.color)
             ? tb.color.replace('#', '')
-            : defaultTextColor;
+            : (perBlockColor || defaultTextColor);
           const tbFont = (typeof tb.fontFamily === 'string' && tb.fontFamily.trim())
             ? tb.fontFamily.trim()
             : 'Arial';
@@ -766,7 +841,7 @@ function detectSlideBgLuma(dataUrl) {
 function SlideCard({ slide, index, onUpdateText }) {
   const wrapRef = useRef(null);
   const [W, setW] = useState(960);
-  const [darkBg, setDarkBg] = useState(false);
+  const [fallbackTextColor, setFallbackTextColor] = useState('#111111');
 
   useEffect(() => {
     if (!wrapRef.current) return;
@@ -780,12 +855,11 @@ function SlideCard({ slide, index, onUpdateText }) {
   useEffect(() => {
     const src = slide.cleanedDataUrl || slide.origDataUrl;
     if (!src) return;
-    detectSlideBgLuma(src).then(luma => setDarkBg(luma < 128));
+    detectSlideBgLuma(src).then(luma => setFallbackTextColor(luma < 128 ? '#f0f0f0' : '#111111'));
   }, [slide.cleanedDataUrl, slide.origDataUrl]);
 
   const H = W * 9 / 16;
   const ptToPx = H / 540;
-  const textColor = darkBg ? '#f0f0f0' : '#111111';
 
   function estimateLines(tb) {
     const blockWpx = Math.max(1, (tb.w || 0.1) * W);
@@ -819,6 +893,8 @@ function SlideCard({ slide, index, onUpdateText }) {
           const lines = estimateLines(tb);
           const fontPx = Math.max(11, (tb.fontSize || 14) * ptToPx);
           const blockHeightPct = Math.max(1.5, (tb.h || 0) * 100 * lines * 1.25);
+          const meta = (slide.perBlock && slide.perBlock[bi]) || null;
+          const blockColor = meta?.textColor || fallbackTextColor;
           return (
             <div key={bi} contentEditable suppressContentEditableWarning
               className="editable-text-block"
@@ -832,7 +908,7 @@ function SlideCard({ slide, index, onUpdateText }) {
                 fontStyle: tb.italic ? 'italic' : 'normal',
                 textAlign: tb.align || 'left',
                 fontFamily: 'Arial, sans-serif',
-                color: textColor,
+                color: blockColor,
               }}
               onBlur={(e) => onUpdateText(bi, e.currentTarget.innerText)}
               dangerouslySetInnerHTML={{
