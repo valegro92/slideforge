@@ -31,3 +31,6 @@ lerna-debug.log*
 # Misc
 .turbo
 .vercel
+
+# Claude Code session-start hook runtime artifacts
+.claude/logs/
